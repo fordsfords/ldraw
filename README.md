@@ -88,8 +88,9 @@ tools with no schematic representation.
 
 Pin IDs are a letter followed by a number (e.g. `i0`, `q0`, `R0`).
 **Upper-case letter = active-low (inverted) signal.**
-Any pin whose id starts with upper-case automatically gets an inversion
-bubble in the rendered symbol. Universal rule, no per-device specification.
+Any pin whose ID starts with an upper-case letter automatically gets an
+inversion bubble in the rendered symbol. This is the only mechanism that
+produces bubbles — there is no per-device bubble specification.
 
 ---
 
@@ -107,18 +108,33 @@ Each parsed `d` command creates a component object:
 
 ### Wires
 
-A "wire" is line graph on the drawing that connects an output to one or
-more inputs. A wire can be a single segment, which can change
-directions by 90 degrees any number of times, or can be a set of
-segments joined by branch points. So a wire is a binary tree of segments.
+A "wire" is a line graph on the drawing that connects an output to one or
+more inputs. A wire can be a single segment or a set of
+segments joined by branch points, forming a binary tree of segments.
 When an output must be connected to more than one input, the path must be
-broken into multiple line segments, forming a binary tree of segments connected
-at "branch points", represented visually as dots.
-Each branch point has one upstream line segment and two downstream line segments.
+broken into multiple segments connected at "branch points", represented
+visually as dots.
+Each branch point has one upstream segment and two downstream segments.
 The root of the tree is the output of a component and the leaves are
 the inputs that it connects to.
-Note that segments must not overlap. They are allowed to cross without connection (a "+" junction visually).
-A branch point is visually a "T" junction that can be in any of the 4 orientations.
+
+A branch point is visually a "T" junction that can be in any of the 4
+orientations. A branch point is created by splitting an existing segment
+at a point along its path, producing two segments from the original plus
+a new third segment for the branch.
+
+Segments are allowed to cross without connection (a "+" junction visually).
+
+#### Segment non-overlap rule
+
+No two segments may share any portion of a collinear run: two horizontal
+segments on the same Y must not share any X range, and two vertical segments
+on the same X must not share any Y range. This applies across all wires,
+not just within a single wire.
+
+Additionally, every waypoint and branch point must have globally unique
+coordinates — no two unconnected segment endpoints or waypoints may occupy
+the same (x, y) position.
 
 A wire is internally represented as:
 - A reference to a component output (root of the tree)
@@ -129,9 +145,11 @@ A branch point contains references to the three segment ends that connect to it:
 - downstream A.
 - downstream B.
 
-A segment has two ends (upstream and downstream) and a list of waypoints for direction changes.
+A segment is an orthogonal polyline defined by an ordered list of waypoints;
+each consecutive pair of waypoints forms one horizontal or vertical run.
+A segment has two ends (upstream and downstream).
 Each segment end connects to either a component output, a component input, or a branch point.
-It also contains a reference to the wire that it's part of.
+A segment also contains a reference to the wire that it is part of.
 
 Each component's inputs and outputs contain references to the wire and segment end they connect to.
 
@@ -201,76 +219,32 @@ statements — makes adding new device types trivial.
 - `_renderLabelsSVG(labels, fg, mid)` — same for SVG
 - `_l2c(pivotX, pivotY, totalW, totalH, cos, sin, lx, ly)` — transforms
   local symbol coordinates to canvas space with rotation
+- `_mirrorBoxGeo(geo, axisX)` — flips a geometry object horizontally
+  around axisX; used by all box devices to implement 'left' orientation
 
 ### Style globals
 
 `SYM_FG`, `SYM_MID`, `SYM_BG` — set via `symSetColors(fg, mid, bg)` at
 startup. Separate from CSS; used by both canvas and SVG renderers.
 
-### Symbol shapes by type
+`PIN_SPACE` (constant, 20) — default pin-to-pin spacing used by all box
+device geometry functions.
 
-A shape has a natural orientation. In general, the natural orientation tends to
-have its inputs on the left side of the symbol and its outputs on the right side.
-There can be some exceptions where inputs and outputs are assigned to the top
-and/or bottom of a box-shaped component, but the natural orientation is still
-defined. We call this orientation "right", not in the sense of it being correct,
-but in the sense of its primary outputs pointing to the right.
+### Symbol details
 
-Orientation can be "fixed" (right only), "mirror" (right or left), or "all 4".
+Per-device shapes, pin layouts, orientation support, and rendering logic
+are defined in `ldraw.html` (the block comments above each geometry function
+document the pin assignments and visual conventions). That file is the
+authoritative source for all component rendering details.
 
-| Device | Shape | Orientation |
-|---|---|---|
-| `nand` | IEEE curved body, inversion bubble on output | all 4 |
-| `led` | Circle, input stub on left | all 4 |
-| `swtch` | Circle, output stub on right | all 4 |
-| `gnd` | Downward unfilled triangle, o0 at top | fixed |
-| `vcc` | Upward unfilled triangle, o0 at bottom | fixed |
-| `clk` | Box | fixed |
-| `mem` | Box | fixed |
-| `srlatch` | Box | fixed |
-| `dflipflop` | Box | fixed |
-| `reg` | Box | fixed |
-| `panel` | Box | fixed |
-| `addbit` | Box (= addword with numBits=1) | fixed |
-| `addword` | Box | fixed |
+Key conventions enforced across all devices:
 
-### Pin layouts (box devices)
-
-**clk**: R0 left (co-linear with Q0, bubble), q0 right upper, Q0 right lower (bubble)
-
-**mem**: a0..an top edge, w0 bottom centered, i0..in left, o0..on right.
-Box minimum size = 4 pins on each edge.
-
-**srlatch**: S0 left upper (bubble), R0 left lower (bubble), q0 right upper, Q0 right lower (bubble)
-
-**dflipflop**: S0 top centered (bubble), R0 bottom centered (bubble),
-d0 left upper, c0 left lower (clock triangle, no label),
-q0 right upper (co-linear with d0), Q0 right lower (bubble, co-linear with c0)
-
-**reg**: c0 top centered (downward clock triangle, no label), R0 bottom
-centered (bubble), d0..dn left, q0..qn right.
-Note: Q outputs omitted by design — higher-level abstraction, use inverter
-downstream if inverted output needed.
-
-**panel**: i0..in left (LED inputs), o0..on right (switch outputs). No control pins.
-
-**addword / addbit**: a0..an top, b0..bn left, o0..on right (sum, co-linear
-with b), i0 bottom-left (carry in), o0_carry bottom-right (carry out).
-addbit is addword with numBits=1. Carry chain flows bottom-to-bottom
-when cascading adders left-to-right.
-
-### Clock triangle
-
-Edge-triggered clock inputs use a triangle symbol instead of a label:
-- Left edge entry: triangle points right (into box) — `dir:'right'`
-- Top edge entry: triangle points down (into box) — `dir:'down'`
-Shape type `clockTriangle` is handled by both canvas and SVG shared renderers.
-
-### NAND gate specifics
-
-- Input count drives body height; pins evenly spaced on input edge
-- 1-input NAND (inverter) uses same body shape
-- Future: threshold (~5 inputs) above which fallback to labeled box with bubble
+- A device's "natural" orientation has primary outputs pointing right.
+  "fixed" = right only; "mirror" = right or left; "all 4" = right/left/up/down.
+- `nand`, `led`, and `swtch` support all 4 orientations.
+- Box devices (`clk`, `mem`, `srlatch`, `dflipflop`, `reg`, `panel`, `addword`, `addbit`) support mirror orientation.
+- `gnd` and `vcc` are fixed orientation.
+- Edge-triggered clock inputs use a `clockTriangle` shape instead of a pin label.
 
 ---
 
@@ -291,9 +265,6 @@ as routed lines but as named stubs — an arrowhead pointing at a label. Any
 pin connecting to the same label name is logically wired, without a visible
 routed wire.
 
-- `gnd` and `vcc` are special cases: each component that connects to them
-  gets its own local triangle symbol rather than an arrow pointing to
-  a net label.
 - Any output can define a named net (e.g. clock's q0 → net "clock-q").
   Any input connecting to it renders as an arrow stub with that label.
 - The named-net property belongs on the **wire**, not the device.
@@ -303,11 +274,177 @@ routed wire.
 - The drawing save format must store named-net assignments alongside
   component positions and wire waypoints.
 
+`gnd` and `vcc` receive no special treatment. They are ordinary components
+that must be placed and wired like any other device. If their wires are
+converted to named nets, consuming inputs render as arrow stubs with the
+net label — the same mechanism used for all other named nets.
+
+---
+
+## Open Design Questions
+
+These items were identified during review and need resolution.
+
+### Wire-to-pin attachment
+
+Each pin's geometry includes a connection point (the tip of its stub line,
+stored in `pins[id] = {x, y}`). Wires attach at this point. The first
+run of a wire leaving an output pin must travel in the direction the stub
+points (away from the component body). Same constraint applies to the
+last run arriving at an input pin.
+
+### Grid and snapping
+
+Not yet defined. For clean Manhattan routing, a snap-to-grid system is
+almost certainly needed. Candidate: define a grid pitch (e.g. 10 px) and
+snap all component positions, waypoints, and branch points to grid
+intersections.
+
+### Z-order / draw order
+
+Not yet defined. Typical convention: wires drawn first, components on top.
+Wire crossings shown with a small gap or bridge on the lower wire (or simply
+drawn as a plain cross — TBD).
+
+### .ldraw save format
+
+Must store at minimum: component positions and orientations, wire trees
+(segment waypoints, branch point locations, pin attachments), and
+named-net assignments.
+
+**Resolved:** Format is pretty-printed JSON. Schema not yet defined.
+
+### SVG export scope
+
+Not yet defined. Likely: export only placed components and their attached
+wires (complete or incomplete). Unplaced components excluded.
+
+### Include (`i`) command namespacing
+
+The `i` command loads another .lsim file recursively. If two included files
+define a device with the same name, is that an error? Are names prefixed
+with the include path? This is an .lsim language question, but ldraw must
+handle it correctly during parsing.
+
+### Component repositioning
+
+**Resolved:** Yes, placed components can be moved (left-click drag).
+Attached segments remain in place but become floating (disconnected
+from the moved component's pins). No rubber-banding — reconnection is
+manual. Components can also be returned to the unplaced list via
+right-click context menu; same breakage rules apply.
+
 ---
 
 ## User Interface
 
-TBD
+### Application Launch
+
+Single self-contained HTML file opened in Chrome. URL parameters provide
+hints for which files to load:
+
+    ldraw.html?lsim=seq1.lsim&ldraw=seq1.ldraw
+
+These hints are displayed to the user but cannot auto-open files (browser
+security). The user confirms each file load via a picker dialog.
+
+### File Loading
+
+Two load operations at startup, both via File System Access API pickers:
+
+1. **Load .lsim** (required) — parses circuit structure.
+2. **Load .ldraw** (optional) — restores previous drawing state. If
+   skipped, internal state initializes with all components and connections
+   unplaced and no wires.
+
+Drag-and-drop is also supported: user can drop one or both files onto
+the canvas area. Files are distinguished by extension.
+
+### Saving
+
+Two independent save operations, each triggered separately:
+
+- **Save .ldraw** — serializes drawing state (component positions,
+  orientations, wire trees, named-net assignments). Format is
+  pretty-printed JSON for human readability and diff-friendliness.
+- **Export .svg** — exports current canvas as SVG.
+
+These are deliberately not bundled. The user may save .ldraw frequently
+while working and only export .svg occasionally, or vice versa.
+
+### Typical Workflow
+
+1. Launch tool, load .lsim, optionally load .ldraw.
+2. Place components, route wires, edit drawing.
+3. Save .ldraw and/or export .svg as desired.
+4. Return to step 2 or close.
+
+Relaunch later: load same .lsim + saved .ldraw → resume at step 2.
+
+### Component Placement — Unplaced View
+
+A button labeled "Unplaced" switches the canvas to a dedicated view
+showing all unplaced components rendered with their symbols and names.
+Components are displayed in the order they appear in the .lsim file
+(or alphabetical if parse order isn't preserved). No filtering or
+sorting controls in v1 — can be added later if needed.
+
+The user clicks down on a component in this view. The mousedown:
+- Grabs the component.
+- Immediately repaints the canvas to the normal drawing view.
+- The component appears as a ghost image attached to the cursor at
+  the current mouse position (no spatial discontinuity — pointer
+  stays in the same screen position across the repaint).
+- Component is in default 'right' orientation during placement.
+  Orientation is not changeable during the drag.
+- User moves the ghost to the desired position and releases.
+  The component is now placed.
+
+This interaction is deliberately consistent with the move interaction
+(see below).
+
+### Component Context Menu (Right-Click)
+
+Right-clicking a placed component opens a context menu with:
+
+- **Orientation** — submenu with right / left / up / down. Options
+  that are not supported by the device type are greyed out.
+- **Unplace** — returns the component to the unplaced list.
+
+### Component Movement
+
+Left-click and hold on a placed component picks it up as a ghost image.
+Drag to new position, release to place. Same visual feedback as initial
+placement.
+
+**Wire breakage on move:** If the component has segments attached to
+its pins, those segments remain in place but their endpoints become
+floating (disconnected from the pin). The wire topology is otherwise
+preserved — only the attachment points to the moved component are
+broken. Even if the component is moved back to its original position,
+segments remain disconnected and must be manually reconnected.
+
+This applies equally to Unplace — any attached segments become floating.
+
+### Disconnected Segment Visual
+
+A segment that is not connected to a component pin or branch point on
+both ends is drawn in yellow (vs. the normal wire color). This provides
+a clear visual indicator of "broken" wires that need attention.
+
+### Click Interpretation
+
+Left-click meaning depends on application state:
+
+- **Unplaced view:** mousedown on a component grabs it for placement.
+- **Normal drawing view, neutral mode:** left-click on a placed
+  component picks it up for movement.
+- **Wire routing mode (TBD):** left-click places waypoints or attaches
+  to pins.
+
+Care must be taken as wire routing is designed to ensure click targets
+are unambiguous — clicking on a component vs. clicking on empty canvas
+vs. clicking on a wire must be clearly distinguishable by context/state.
 
 ---
 

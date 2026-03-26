@@ -24,7 +24,9 @@
 //
 // Orientation:
 //   nand, led, swtch accept orientation: 'right'|'left'|'up'|'down'
-//   All other devices are fixed orientation (no rotation).
+//   Box devices (clk, mem, srlatch, dflipflop, reg, panel, addword, addbit)
+//     accept orientation: 'right'|'left' (mirror)
+//   gnd, vcc are fixed orientation (no rotation).
 //
 // Pin ids match circuit-language-docs.md exactly.
 // pins[id] = { x, y } — canvas-space wire connection point (stub endpoint).
@@ -49,6 +51,8 @@
 let SYM_FG  = '#2c2c2a';   // stroke and name-label color
 let SYM_MID = '#5f5e5a';   // pin-label color
 let SYM_BG  = '#f1efe8';   // body fill
+
+const PIN_SPACE = 20;       // default pin-to-pin spacing for box devices
 
 function symSetColors(fg, mid, bg) {
   SYM_FG = fg;  SYM_MID = mid;  SYM_BG = bg;
@@ -82,6 +86,8 @@ function _renderShapesCanvas(ctx, shapes, fg, bg) {
       ctx.beginPath();
       if (dir==='down') {
         ctx.moveTo(x-size,y); ctx.lineTo(x,y+size*1.4); ctx.lineTo(x+size,y);
+      } else if (dir==='left') {
+        ctx.moveTo(x,y-size); ctx.lineTo(x-size*1.4,y); ctx.lineTo(x,y+size);
       } else {
         ctx.moveTo(x,y-size); ctx.lineTo(x+size*1.4,y); ctx.lineTo(x,y+size);
       }
@@ -106,6 +112,7 @@ function _renderShapesSVG(shapes, fg, bg) {
       const {x,y,size,dir}=s;
       let pts;
       if (dir==='down') pts=`${_p(x-size)},${_p(y)} ${_p(x)},${_p(y+size*1.4)} ${_p(x+size)},${_p(y)}`;
+      else if (dir==='left') pts=`${_p(x)},${_p(y-size)} ${_p(x-size*1.4)},${_p(y)} ${_p(x)},${_p(y+size)}`;
       else              pts=`${_p(x)},${_p(y-size)} ${_p(x+size*1.4)},${_p(y)} ${_p(x)},${_p(y+size)}`;
       out.push(`<polygon points="${pts}" fill="none" stroke="${fg}" stroke-width="${s.lineWidth}" stroke-linejoin="round"/>`);
     }
@@ -131,6 +138,37 @@ function _renderLabelsSVG(labels, fg, mid) {
     const anchor = l.align==='left' ? 'start' : l.align==='right' ? 'end' : 'middle';
     return `<text x="${_p(l.x)}" y="${_p(l.y)}" font-family="sans-serif" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}" dominant-baseline="central">${l.text}</text>`;
   });
+}
+
+// --- Mirror helper for box devices (right ↔ left) ---------------------------
+
+function _mirrorBoxGeo(geo, axisX) {
+  function mx(x) { return 2 * axisX - x; }
+
+  for (const s of geo.shapes) {
+    if (s.type==='rect') {
+      s.x = mx(s.x + s.w);          // mirror right edge becomes new left edge
+    } else if (s.type==='circle') {
+      s.cx = mx(s.cx);
+    } else if (s.type==='line') {
+      s.x1 = mx(s.x1); s.x2 = mx(s.x2);
+    } else if (s.type==='polygon') {
+      for (const p of s.points) p[0] = mx(p[0]);
+    } else if (s.type==='clockTriangle') {
+      s.x = mx(s.x);
+      if (s.dir==='right') s.dir='left';
+      else if (s.dir==='left') s.dir='right';
+    }
+  }
+  for (const l of geo.labels) {
+    l.x = mx(l.x);
+    if (l.align==='left') l.align='right';
+    else if (l.align==='right') l.align='left';
+  }
+  for (const key of Object.keys(geo.pins)) {
+    geo.pins[key].x = mx(geo.pins[key].x);
+  }
+  return geo;
 }
 
 // =============================================================================
@@ -221,8 +259,7 @@ function renderNandSVG(geo,fg,mid,bg) {
     if (s.type==='nandBody') {
       const [tlx,tly]=s.topLeft,[blx,bly]=s.botLeft;
       const [bax,bay]=s.botArcStart,[tax,tay]=s.topArcEnd;
-      const angleDeg=_p(geo.angle*180/Math.PI);
-      const d=`M ${_p(tlx)} ${_p(tly)} L ${_p(blx)} ${_p(bly)} L ${_p(bax)} ${_p(bay)} A ${_p(s.arcR)} ${_p(s.arcR)} ${angleDeg} 0 0 ${_p(tax)} ${_p(tay)} Z`;
+      const d=`M ${_p(tlx)} ${_p(tly)} L ${_p(blx)} ${_p(bly)} L ${_p(bax)} ${_p(bay)} A ${_p(s.arcR)} ${_p(s.arcR)} 0 0 0 ${_p(tax)} ${_p(tay)} Z`;
       out.push(`<path d="${d}" fill="${bg}" stroke="${fg}" stroke-width="${s.lineWidth}" stroke-linejoin="round"/>`);
     } else {
       out.push(..._renderShapesSVG([s],fg,bg));
@@ -367,14 +404,14 @@ function renderVccSVG(geo,fg,mid,bg) {
 // =============================================================================
 // CLK
 // =============================================================================
-// Fixed orientation box.
+// Mirror orientation box (right or left).
 // R0 — left edge co-linear with Q0, active-low (bubble on input side)
 // q0 — right edge upper
 // Q0 — right edge lower, active-low (bubble on output side)
 // Name centered vertically between q0 and Q0.
 // =============================================================================
 
-function clkGeometry(ox,oy,name) {
+function clkGeometry(ox,oy,name,orientation) {
   const boxW=70,rowTop=20,rowBot=80,boxH=rowBot+rowTop;
   const BUBBLE=5,STUB=18,PAD=10;
   const q0Y=oy+rowTop,Q0Y=oy+rowBot,R0Y=Q0Y;
@@ -398,7 +435,8 @@ function clkGeometry(ox,oy,name) {
     Q0:{x:ox+boxW+BUBBLE*2+STUB,y:Q0Y},
     R0:{x:ox-BUBBLE*2-STUB,y:R0Y},
   };
-  return {boxW,boxH,shapes,labels,pins};
+  const geo={boxW,boxH,shapes,labels,pins};
+  return orientation==='left' ? _mirrorBoxGeo(geo,ox+boxW/2) : geo;
 }
 
 function renderClkCanvas(ctx,geo,fg,mid,bg) {
@@ -412,19 +450,19 @@ function renderClkSVG(geo,fg,mid,bg) {
 // =============================================================================
 // MEM
 // =============================================================================
-// Fixed orientation box. Size scales with numAddr and numData (min 4 pins).
+// Mirror orientation box (right or left). Size scales with numAddr and numData (min 4 pins).
 // a0..a(n-1) — top edge, evenly spaced
 // w0         — bottom edge, centered
 // i0..i(n-1) — left edge, evenly spaced  (data in)
 // o0..o(n-1) — right edge, evenly spaced (data out)
 // =============================================================================
 
-function memGeometry(ox,oy,name,numAddr,numData) {
+function memGeometry(ox,oy,name,numAddr,numData,orientation) {
   const MIN_PINS=4;
   const effData=Math.max(numData,MIN_PINS),effAddr=Math.max(numAddr,MIN_PINS);
   const boxH=(effData+1)*PIN_SPACE;
   const boxW=Math.max(100,(effAddr+1)*PIN_SPACE);
-  const STUB=18,PAD=10,PIN_SPACE_=PIN_SPACE;
+  const STUB=18,PAD=10;
 
   const shapes=[{type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5}];
   const labels=[{x:ox+boxW/2,y:oy+boxH/2,text:name,kind:'name',align:'center'}];
@@ -454,7 +492,8 @@ function memGeometry(ox,oy,name,numAddr,numData) {
     pins[`o${i}`]={x:ox+boxW+STUB,y:py};
   }
 
-  return {boxW,boxH,shapes,labels,pins};
+  const geo={boxW,boxH,shapes,labels,pins};
+  return orientation==='left' ? _mirrorBoxGeo(geo,ox+boxW/2) : geo;
 }
 
 function renderMemCanvas(ctx,geo,fg,mid,bg) {
@@ -468,14 +507,14 @@ function renderMemSVG(geo,fg,mid,bg) {
 // =============================================================================
 // SRLATCH
 // =============================================================================
-// Fixed orientation box.
+// Mirror orientation box (right or left).
 // S0 — left upper, active-low (bubble)
 // R0 — left lower, active-low (bubble)
 // q0 — right upper, plain
 // Q0 — right lower, active-low (bubble)
 // =============================================================================
 
-function srlatchGeometry(ox,oy,name) {
+function srlatchGeometry(ox,oy,name,orientation) {
   const boxW=70,boxH=80,BUBBLE=5,STUB=18,PAD=10;
   const S0Y=oy+boxH*0.3,R0Y=oy+boxH*0.7;
   const q0Y=oy+boxH*0.3,Q0Y=oy+boxH*0.7;
@@ -503,7 +542,8 @@ function srlatchGeometry(ox,oy,name) {
     q0:{x:ox+boxW+STUB,y:q0Y},
     Q0:{x:ox+boxW+BUBBLE*2+STUB,y:Q0Y},
   };
-  return {boxW,boxH,shapes,labels,pins};
+  const geo={boxW,boxH,shapes,labels,pins};
+  return orientation==='left' ? _mirrorBoxGeo(geo,ox+boxW/2) : geo;
 }
 
 function renderSrlatchCanvas(ctx,geo,fg,mid,bg) {
@@ -517,7 +557,7 @@ function renderSrlatchSVG(geo,fg,mid,bg) {
 // =============================================================================
 // DFLIPFLOP
 // =============================================================================
-// Fixed orientation box.
+// Mirror orientation box (right or left).
 // S0 — top edge centered, active-low (bubble on top)
 // R0 — bottom edge centered, active-low (bubble on bottom)
 // d0 — left edge upper, plain
@@ -526,7 +566,7 @@ function renderSrlatchSVG(geo,fg,mid,bg) {
 // Q0 — right edge lower, active-low (bubble)  (co-linear with c0)
 // =============================================================================
 
-function dflipflopGeometry(ox,oy,name) {
+function dflipflopGeometry(ox,oy,name,orientation) {
   const boxW=70,boxH=100,BUBBLE=5,STUB=18,PAD=10,TRI=7;
   const d0Y=oy+boxH*0.3,c0Y=oy+boxH*0.7;
   const q0Y=d0Y,Q0Y=c0Y;
@@ -561,7 +601,8 @@ function dflipflopGeometry(ox,oy,name) {
     q0:{x:ox+boxW+STUB,y:q0Y},
     Q0:{x:ox+boxW+BUBBLE*2+STUB,y:Q0Y},
   };
-  return {boxW,boxH,shapes,labels,pins};
+  const geo={boxW,boxH,shapes,labels,pins};
+  return orientation==='left' ? _mirrorBoxGeo(geo,ox+boxW/2) : geo;
 }
 
 function renderDflipflopCanvas(ctx,geo,fg,mid,bg) {
@@ -575,7 +616,7 @@ function renderDflipflopSVG(geo,fg,mid,bg) {
 // =============================================================================
 // REG
 // =============================================================================
-// Fixed orientation box. numBits determines pin count and height.
+// Mirror orientation box (right or left). numBits determines pin count and height.
 // c0 — top edge centered, edge-triggered clock (downward triangle, no label)
 // R0 — bottom edge centered, active-low (bubble)
 // d0..d(n-1) — left edge, evenly spaced
@@ -583,7 +624,7 @@ function renderDflipflopSVG(geo,fg,mid,bg) {
 // Note: Q outputs omitted by design decision (higher-level abstraction).
 // =============================================================================
 
-function regGeometry(ox,oy,name,numBits) {
+function regGeometry(ox,oy,name,numBits,orientation) {
   const boxW=70,TRI=7,BUBBLE=5,STUB=18,PAD=10;
   const boxH=Math.max(80,(numBits+1)*PIN_SPACE);
   const pinSpacing=boxH/(numBits+1);
@@ -613,7 +654,8 @@ function regGeometry(ox,oy,name,numBits) {
     pins[`d${i}`]={x:ox-STUB,y:py};
     pins[`q${i}`]={x:ox+boxW+STUB,y:py};
   }
-  return {boxW,boxH,shapes,labels,pins};
+  const geo={boxW,boxH,shapes,labels,pins};
+  return orientation==='left' ? _mirrorBoxGeo(geo,ox+boxW/2) : geo;
 }
 
 function renderRegCanvas(ctx,geo,fg,mid,bg) {
@@ -627,13 +669,13 @@ function renderRegSVG(geo,fg,mid,bg) {
 // =============================================================================
 // PANEL
 // =============================================================================
-// Fixed orientation box. numBits determines pin count and height.
+// Mirror orientation box (right or left). numBits determines pin count and height.
 // i0..i(n-1) — left edge, evenly spaced  (LED inputs)
 // o0..o(n-1) — right edge, evenly spaced (switch outputs)
 // No clock, no reset.
 // =============================================================================
 
-function panelGeometry(ox,oy,name,numBits) {
+function panelGeometry(ox,oy,name,numBits,orientation) {
   const boxW=70,STUB=18,PAD=10;
   const boxH=Math.max(80,(numBits+1)*PIN_SPACE);
   const pinSpacing=boxH/(numBits+1);
@@ -649,7 +691,8 @@ function panelGeometry(ox,oy,name,numBits) {
     pins[`i${i}`]={x:ox-STUB,y:py};
     pins[`o${i}`]={x:ox+boxW+STUB,y:py};
   }
-  return {boxW,boxH,shapes,labels,pins};
+  const geo={boxW,boxH,shapes,labels,pins};
+  return orientation==='left' ? _mirrorBoxGeo(geo,ox+boxW/2) : geo;
 }
 
 function renderPanelCanvas(ctx,geo,fg,mid,bg) {
@@ -663,7 +706,7 @@ function renderPanelSVG(geo,fg,mid,bg) {
 // =============================================================================
 // ADDWORD (and ADDBIT as numBits=1)
 // =============================================================================
-// Fixed orientation box. numBits determines pin count and size.
+// Mirror orientation box (right or left). numBits determines pin count and size.
 // a0..a(n-1) — top edge, evenly spaced
 // b0..b(n-1) — left edge, evenly spaced
 // o0..o(n-1) — right edge, evenly spaced (co-linear with b pins, sum outputs)
@@ -674,7 +717,7 @@ function renderPanelSVG(geo,fg,mid,bg) {
 // Carry chain flows bottom-to-bottom when cascading adders left-to-right.
 // =============================================================================
 
-function addwordGeometry(ox,oy,name,numBits) {
+function addwordGeometry(ox,oy,name,numBits,orientation) {
   const STUB=18,PAD=10;
   const boxH=Math.max(60,(numBits+1)*PIN_SPACE);
   const boxW=Math.max(70,(numBits+1)*PIN_SPACE);
@@ -701,7 +744,7 @@ function addwordGeometry(ox,oy,name,numBits) {
     const py=oy+bSpacing*(i+1);
     shapes.push({type:'line',x1:ox+boxW,y1:py,x2:ox+boxW+STUB,y2:py,lineWidth:1.5});
     labels.push({x:ox+boxW-PAD,y:py,text:`o${i}`,kind:'pin',align:'right'});
-    pins[`s${i}`]={x:ox+boxW+STUB,y:py};
+    pins[`o${i}`]={x:ox+boxW+STUB,y:py};
   }
 
   const iX=ox+boxW*0.25;
@@ -714,7 +757,8 @@ function addwordGeometry(ox,oy,name,numBits) {
   labels.push({x:cX,y:oy+boxH-PAD,text:'c',kind:'pin',align:'center'});
   pins['o0_carry']={x:cX,y:oy+boxH+STUB};
 
-  return {boxW,boxH,shapes,labels,pins};
+  const geo={boxW,boxH,shapes,labels,pins};
+  return orientation==='left' ? _mirrorBoxGeo(geo,ox+boxW/2) : geo;
 }
 
 function renderAddwordCanvas(ctx,geo,fg,mid,bg) {
@@ -726,7 +770,7 @@ function renderAddwordSVG(geo,fg,mid,bg) {
 }
 
 // addbit is an alias — same geometry, same renderers
-const addbitGeometry    = (ox,oy,name) => addwordGeometry(ox,oy,name,1);
+const addbitGeometry    = (ox,oy,name,orientation) => addwordGeometry(ox,oy,name,1,orientation);
 const renderAddbitCanvas = renderAddwordCanvas;
 const renderAddbitSVG    = renderAddwordSVG;
 
@@ -744,14 +788,14 @@ const SYMBOL_FACTORIES = {
   swtch:      (ox,oy,name,params,orient) => swtchGeometry(ox,oy,name,orient),
   gnd:        (ox,oy,name)               => gndGeometry(ox,oy,name),
   vcc:        (ox,oy,name)               => vccGeometry(ox,oy,name),
-  clk:        (ox,oy,name)               => clkGeometry(ox,oy,name),
-  mem:        (ox,oy,name,params)        => memGeometry(ox,oy,name,params.numAddr,params.numData),
-  srlatch:    (ox,oy,name)               => srlatchGeometry(ox,oy,name),
-  dflipflop:  (ox,oy,name)               => dflipflopGeometry(ox,oy,name),
-  reg:        (ox,oy,name,params)        => regGeometry(ox,oy,name,params.numBits),
-  panel:      (ox,oy,name,params)        => panelGeometry(ox,oy,name,params.numBits),
-  addbit:     (ox,oy,name)               => addbitGeometry(ox,oy,name),
-  addword:    (ox,oy,name,params)        => addwordGeometry(ox,oy,name,params.numBits),
+  clk:        (ox,oy,name,params,orient) => clkGeometry(ox,oy,name,orient),
+  mem:        (ox,oy,name,params,orient) => memGeometry(ox,oy,name,params.numAddr,params.numData,orient),
+  srlatch:    (ox,oy,name,params,orient) => srlatchGeometry(ox,oy,name,orient),
+  dflipflop:  (ox,oy,name,params,orient) => dflipflopGeometry(ox,oy,name,orient),
+  reg:        (ox,oy,name,params,orient) => regGeometry(ox,oy,name,params.numBits,orient),
+  panel:      (ox,oy,name,params,orient) => panelGeometry(ox,oy,name,params.numBits,orient),
+  addbit:     (ox,oy,name,params,orient) => addbitGeometry(ox,oy,name,orient),
+  addword:    (ox,oy,name,params,orient) => addwordGeometry(ox,oy,name,params.numBits,orient),
 };
 
 const CANVAS_RENDERERS = {
