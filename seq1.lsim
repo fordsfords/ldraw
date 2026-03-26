@@ -1,0 +1,153 @@
+# seq1.lsim
+# See seq1.txt
+
+# @mksch vcc skip
+d;vcc;vcc;
+# @mksch gnd skip
+d;gnd;gnd;
+
+# @mksch rst skip
+d;swtch;rst;0;
+# @mksch w_sw skip
+d;swtch;w_sw;0;
+# @mksch a_sw skip
+d;swtch;a_sw;0;
+# @mksch d_sw skip
+d;swtch;d_sw;0;
+
+# @mksch srr right l=Rst-Release
+d;dflipflop;srr;
+# @mksch sr1 right l=Fetch
+d;dflipflop;sr1;
+# @mksch sr2a right l=ExecA1
+d;dflipflop;sr2a;
+# @mksch sr3a right l=ExecA2
+d;dflipflop;sr3a;
+# @mksch sr2b down l=ExecB
+d;dflipflop;sr2b;
+# @mksch opcode right l=Opcode
+d;dflipflop;opcode;
+
+# @mksch led1 right l=Fetch
+d;led;led1;
+# @mksch led2a right l=ExecA1
+d;led;led2a;
+# @mksch led3a right l=ExecA2
+d;led;led3a;
+# @mksch led2b down l=ExecB
+d;led;led2b;
+
+# @mksch n1 right
+d;nand;n1;3;
+# @mksch n2a right
+d;nand;n2a;2;
+# @mksch n2a_i right
+d;nand;n2a_i;1;
+# @mksch n2b right
+d;nand;n2b;2;
+# @mksch n2b_i right
+d;nand;n2b_i;1;
+# @mksch n_op right
+d;nand;n_op;2;
+# @mksch n_op_i right
+d;nand;n_op_i;1;
+
+# @mksch clk skip
+d;clk;clk;
+
+# @mksch mem1 right l=Mem
+d;mem;mem1;1;1;
+
+c;gnd;o0;srr;d0;
+
+c;vcc;o0;srr;R0;
+c;vcc;o0;sr1;S0;
+c;vcc;o0;sr2a;S0;
+c;vcc;o0;sr3a;S0;
+c;vcc;o0;sr2b;S0;
+c;vcc;o0;opcode;S0;
+
+# reset sets sr1
+c;rst;o0;srr;S0;
+c;rst;o0;sr1;R0;
+c;rst;o0;sr2a;R0;
+c;rst;o0;sr3a;R0;
+c;rst;o0;sr2b;R0;
+c;rst;o0;opcode;R0;
+c;rst;o0;clk;R0;
+
+c;w_sw;o0;mem1;w0;
+c;a_sw;o0;mem1;a0;
+c;d_sw;o0;mem1;i0;
+
+c;srr;q0;n1;i2;
+
+c;sr1;q0;led1;i0;
+c;sr1;q0;n_op;i1;
+c;sr1;q0;n2a;i1;
+c;sr1;q0;n2b;i0;
+
+c;sr2a;q0;led2a;i0;
+c;sr2a;q0;sr3a;d0;
+c;sr3a;q0;led3a;i0;
+c;sr3a;Q0;n1;i0;
+c;sr2b;q0;led2b;i0;
+c;sr2b;Q0;n1;i1;
+
+c;opcode;q0;n2b;i1;
+c;opcode;Q0;n2a;i0;
+
+c;n1;o0;sr1;d0;
+c;n2a;o0;n2a_i;i0;
+c;n2a_i;o0;sr2a;d0;
+c;n2b;o0;n2b_i;i0;
+c;n2b_i;o0;sr2b;d0;
+c;n_op;o0;n_op_i;i0;
+c;n_op_i;o0;opcode;c0;
+
+c;clk;q0;srr;c0;
+c;clk;q0;sr1;c0;
+c;clk;q0;sr2a;c0;
+c;clk;q0;sr3a;c0;
+c;clk;q0;sr2b;c0;
+c;clk;q0;n_op;i0;
+
+c;mem1;o0;opcode;d0;
+
+w;rst;1;
+w;srr;1;
+w;n1;1;
+
+# @mksch probe_op skip
+d;probe;probe_op;1;
+c;n_op_i;o0;probe_op;c0;
+w;n_op_i;1;
+c;mem1;o0;probe_op;d0;
+w;mem1;1;
+
+# @mksch probe_sr2a skip
+d;probe;probe_sr2a;1;
+c;clk;q0;probe_sr2a;c0;
+w;clk;1;
+c;n2a_i;o0;probe_sr2a;d0;
+w;n2a_i;1;
+
+# @mksch probe_sr2b skip
+d;probe;probe_sr2b;1;
+c;clk;q0;probe_sr2b;c0;
+#already done w;clk;1;
+c;n2b_i;o0;probe_sr2b;d0;
+w;n2b_i;1;
+
+v;7;
+
+p;
+# load memory with 0, 1.
+l;mem1;0;0;1;
+# release reset.
+m;rst;1;
+
+t;12;
+
+m;a_sw;1;
+t;12;
