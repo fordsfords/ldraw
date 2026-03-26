@@ -48,9 +48,16 @@
 // =============================================================================
 
 // --- Style globals (set by application at startup) --------------------------
-let SYM_FG  = '#2c2c2a';   // stroke and name-label color
-let SYM_MID = '#5f5e5a';   // pin-label color
+let SYM_FG  = '#2c2c2a';   // stroke and name-label color (default)
+let SYM_MID = '#5f5e5a';   // pin-label color (default)
 let SYM_BG  = '#f1efe8';   // body fill
+
+// Per-component state colors — passed as fg/mid to render functions.
+// "Complete" = all connections wired; "Incomplete" = has floating inputs.
+const SYM_COMPLETE_FG  = '#000000';
+const SYM_COMPLETE_MID = '#333333';
+const SYM_INCOMPLETE_FG  = '#b8860b';   // dark goldenrod — visible on SYM_BG
+const SYM_INCOMPLETE_MID = '#c49b2a';
 
 const PIN_SPACE = 20;       // default pin-to-pin spacing for box devices
 

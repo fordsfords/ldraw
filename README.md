@@ -1,33 +1,48 @@
-# ldraw — Implementation Notes
+# ldraw — logic circuit schematic drawing
 
 ## Purpose
 
-A schematic drawing tool for logic circuits, primarily used for visual
-troubleshooting during CPU design (hobby project — building a simple CPU
-entirely from NAND gates in software simulation). The goal is to visually trace
-signals through a working or broken circuit, not produce publication-quality
-documentation.
+ldraw is a GUI-based interactive schematic diagram drawing tool for creating,
+modifying, and displaying logic circuits.
+
+There is a library of parts that can be placed on a canvas and interconnected.
+The drawing can be saved in a `.ldraw` file that fully defines everything about
+the drawing so that it can be read in the future and the drawing edited.
+
+The visual diagram can also be written in `.svg` form for printing purposes,
+but this will not retain full knowledge of the circuit itself.
+
+The logic circuit can also be saved in a special ".lsim" format that can be
+read by a hardware simulator I wrote called "lsim". This format will be
+fully described in a separate document.
+
+Note that both lsim and ldraw are hobby projects, not intended for public
+use (although both will be on public GitHubs).
+Thus, neither the drawings nor the hardware simulation are intended to
+compete with state of the art tools.
+In particular, only the limited device types recognized by lsim are supported in ldraw.
 
 ## Background
 
 I wrote a digital logic hardware simulator. As part of that, I have a simple circuit
-definition language that defines components and the connections between
+definition language that defines devices and the connections between
 them. A circuit will be defined with this language in a text file with
 the suffix ".lsim".
 
-The ldraw program will:
-1. Read a .lsim file and internalize the components and their interconnections.
-1. Provide a drawing canvas.
-1. Initially all components are "not placed" and all connections are "not made".
-1. The tool allows me to select a "not placed" component and, using the mouse, place it on the canvas.
-1. When one or more compoonents are placed, I can select a connection and, using the mouse, show the tool how I want the wire routed on the canvas.
-1. At any time, the user can request an .svg file, which will match the drawing on the canvas.
-1. The tool can also save its internal representation of the drawing to a ".ldraw" file.
-Thus, at startup, you might first read a ".lsim" file, then read a ".ldraw" file.
-The user then sees the drawing as it previously existed and can modify it and re-save it.
-(The .lsim file is never modified or saved by this tool.)
+To date, creation of the `.lsim` file was fully manual by text editor.
+The intent has always been to have a GUI tool for graphically designing
+the circuit. The lsim tool fulfills that intention.
 
-Details of each function will be provided.
+The ldraw program will:
+* Initially have an empty canvas.
+* Optionally read a `.ldraw` file that defines devices, wires, etc for a previously created circuit.
+* Provide a drawing canvas that renders the circuit.
+* Add and edit devices and wires to complete the circuit.
+* At any time, the user can request an `.svg` file, which will match the drawing on the canvas.
+* The tool can also save its internal representation of the drawing to a ".ldraw" file.
+  Thus, at startup, you can read a ".ldraw" file.
+  You will see the drawing as it previously existed and can modify it and re-save it.
+* The tool can also save a ".lsim" file that represents the circuit for the lsim hardware simulator.
 
 ---
 
@@ -35,13 +50,17 @@ Details of each function will be provided.
 
 These terms will be use carefully and unambiguously in this document to mean only what is defined here.
 
-* Component - a device created by a "d" command in a .lsim file.
-* Connection - an association between a component output and a component input created by a "c" command in a .lsim file.
+* Device - a circuit component, like a NAND gate, an LED, or e register. These correspond to created by a "d" command in a `.lsim` file.
+* Named Net - a special type of pseudo device. See (Named Net)[#named_net].
 * Wire - an object created by ldraw. See (Data Model)[#data_model] below.
 * Segment - an object created by ldraw. See (Data Model)[#data_model] below.
 * Branch point - an object created by ldraw. See (Data Model)[#data_model] below.
-* Upstream - the end of a segment that is graphically closer to the driving component's output.
-* Downstream - the end of a segment that is graphically closer to the consuming components' inputs.
+* Upstream - the end of a segment that is graphically closer to the driving device's output.
+* Downstream - the end of a segment that is graphically closer to the consuming device' inputs.
+* Interfere - when placing a wire segment or a device, interference is when any part of the object being
+  placed overlaps with an existing object. Some forms of interference are allowed. For example,
+  two wire segments can cross each other. But unless otherwise stated, interferences are not alloed.
+  A wire segment cannot occupy the same space as a device or a way point or a branch point or a device pin.
 
 ## Implementation Environment
 
@@ -56,33 +75,24 @@ JavaScript within this single file.
 
 Uses the browser's **File System Access API** (Chrome):
 
-- **Read**: user selects a file via picker; app reads contents as text
-- **Write**: user selects destination; app writes text content directly
+* **Read**: user selects a file via picker; app reads contents as text
+  - Also support drag-and-drop a file
+* **Write**: user selects destination; app writes text content directly
 
 ### Constraints
 
-- Chrome is the target browser
-- No persistent storage between sessions; all state lives in memory
-- All file paths chosen interactively via browser file pickers
+* Chrome is the target browser
+* No persistent storage between sessions; all state lives in memory
 
 ---
 
-## Input File Format
+## Lsim Output File Format
 
-See `circuit-language-docs.md` for the full .lsim format. The drawing tool
-parses only structural commands:
+See `circuit-language-docs.md` for the full `.lsim` format. The drawing tool
+only generates structural commands:
 
-- `d` — Define device (creates a component with typed pins)
-- `c` — Connect (single wire between one output pin and one input pin)
-- `i` — Include (load and parse another file; must be handled recursively)
-
-All other commands (`p`, `t`, `m`, `l`, `v`, `w`, `q`) are ignored.
-
-Note that there is a `b` command for Bus (multi-bit connection).
-For now ldraw will issue an error message if the .lsim file uses it.
-
-Of the devices that can be defined, the `probe` is silently ignored — they are simulator debugging
-tools with no schematic representation.
+* `d` — Define device (creates a device with typed pins)
+* `c` — Connect (single wire between one output pin and one input pin)
 
 ### Pin naming convention
 
@@ -96,36 +106,46 @@ produces bubbles — there is no per-device bubble specification.
 
 ## Data Model
 
-### Components
+### Devices
 
-Each parsed `d` command creates a component object:
-- `type` — device type string (e.g. `nand`, `dflipflop`, `reg`)
-- `name` — unique instance name
-- `params` — type-specific parameters (e.g. numInputs, numBits, numAddr, numData)
-- `position` — {x, y} on canvas (null until placed by user)
-- `orientation` — 'right'|'left'|'up'|'down' (default 'right'; fixed-orientation devices ignore this)
-- `geo` — cached geometry object, recomputed when position or orientation changes
+Each device object contains:
+
+* `type` — device type string (e.g. `nand`, `dflipflop`, `reg`, `namednet`).
+* `name` — unique instance name. Duplicate names are not allowed (except for named nets).
+* `params` — type-specific parameters (e.g. numInputs, numBits, numAddr, numData).
+* `position` — {x, y} on canvas.
+* `orientation` — 'right'|'left'|'up'|'down' (default 'right').
+* `geo` — cached geometry object, recomputed when position or orientation changes.
+
+See the lsim language document for full details of params.
 
 ### Wires
 
-A "wire" is a line graph on the drawing that connects an output to one or
-more inputs. A wire can be a single segment or a set of
+A "wire" is a line graph on the drawing that connects a device output to one or
+more device inputs. A wire can be a single segment or a set of
 segments joined by branch points, forming a binary tree of segments.
 When an output must be connected to more than one input, the path must be
 broken into multiple segments connected at "branch points", represented
 visually as dots.
 Each branch point has one upstream segment and two downstream segments.
-The root of the tree is the output of a component and the leaves are
+The root of the tree is the output of a device and the leaves are
 the inputs that it connects to.
 
 A branch point is visually a "T" junction that can be in any of the 4
-orientations. A branch point is created by splitting an existing segment
-at a point along its path, producing two segments from the original plus
-a new third segment for the branch.
+orientations. Note that the letter "T" itself is shaped as a down-facing
+branch point. A branch point is created by splitting an existing segment
+at its downstream end, producing two new segments.
 
 Segments are allowed to cross without connection (a "+" junction visually).
+But segments cannot overlap a device or overlap another segment.
 
 #### Segment non-overlap rule
+
+A segment is an orthogonal polyline defined by an ordered list of waypoints;
+each consecutive pair of waypoints forms one horizontal or vertical run.
+A segment has two ends, upstream and downstream.
+Each segment end connects to either a device output, a device input, or a branch point.
+A segment also contains a reference to the wire that it is part of.
 
 No two segments may share any portion of a collinear run: two horizontal
 segments on the same Y must not share any X range, and two vertical segments
@@ -137,54 +157,62 @@ coordinates — no two unconnected segment endpoints or waypoints may occupy
 the same (x, y) position.
 
 A wire is internally represented as:
-- A reference to a component output (root of the tree)
-- A binary tree of segments. Each node references a branch point.
+* A reference to a device output (root of the tree)
+* A binary tree of segments. Each node references a branch point.
 
 A branch point contains references to the three segment ends that connect to it:
-- upstream (toward the driving component's output).
-- downstream A.
-- downstream B.
+* upstream (toward the driving device's output).
+* downstream A.
+* downstream B.
 
-A segment is an orthogonal polyline defined by an ordered list of waypoints;
-each consecutive pair of waypoints forms one horizontal or vertical run.
-A segment has two ends (upstream and downstream).
-Each segment end connects to either a component output, a component input, or a branch point.
-A segment also contains a reference to the wire that it is part of.
-
-Each component's inputs and outputs contain references to the wire and segment end they connect to.
+Each device's inputs and outputs contain references to the wire and segment end they connect to.
 
 For this version of the tool, the creation of wires, segments, branch points, and way points are
 created by user action, not generated automatically by the tool (no auto routing).
 
-See "Named Nets" below for wires that are drawn differently. The underlying structure is the
-same, but the visual representation is different.
-
-During operation, a wire is created at an output pin of a component. It can be in an incomplete state,
+During operation, a wire is created at an output pin of a device. It can be in an incomplete state,
 meaning that it contains segments with "floating" downstream ends (not yet connected to any thing).
 This is a normal state of affairs. A wire is termed complete when it fully represents the set of
-connections made to that wire's component output.
+connections made to that wire's device output.
 
 ### Connections
 
-A connection is defined in the input .lsim file. It is not the same thing as a wire or a segment.
-A completed wire will embody one or more connections. Specifically, a wire will embody all connections
-made to a specific component output. The wire will be named "wire:<output-component-name>.<output-component-pin>".
+When generating a `.lsim` file, a wire will generate a set of "c" connection commands for lsim.
+For example, a wire that connects a NAND gate's output to three other devices' inputs will
+generate three connection commands for each of the output:input pairs. Note that the `.lsim`
+file does not have any location information.
 
-### Component State
+### Named Net
 
-- **Placed** components: have an x,y position; geo is computed
-- **Unplaced** components: parsed but not yet positioned; shown in a pending list
+A "named net" is a special kind of pseudo device.
+It two params:
+* Name
+* type ("input" or "output")
 
-### Connection State
+It is drawn as an arrow head pointing at a name.
 
-- **Unplaced** connections: are not represented by any wire.
-- **Placed** connections: A wire connects to the output,input pair associated with the connection.
+For most purposes, it can be treated as any other device.
+It can be created, moved, oriented, and connected to wires.
+It has a single pin, which is an input for input-typed named nets
+and an output for output-typed named nets.
+They can be wired to other devices like any other kind of device.
 
-ldraw maintains a list of connections and components in the "unplaced" state.
-- The user directly places components manually with a mouse.
-- The user places connections indirectly by creating wires.
-I.e. the user does not select a connection to work on it.
-ldraw infers which connections are placed as the user adds segments to a wire and connects segments to inputs.
+The special properties are:
+* Multiple named net devices can share the same name. In fact, that's the point.
+* A group of like-named net devices must have exactly one "input" typed member,
+and zero or more "output" typed members.
+* When generating a `.lsim` output file, named net devices are not treated as
+devices, but rather like wires. All named net devices with a given name are
+considered to be wired directly together. So there is no "d" lsim command
+for the named net. Rather it will generate "c" lsim commands defining the
+connections.
+
+A common use for a named net would be to create a vcc device and a
+named net device of type input named "vcc". A wire segment will be drawn between
+these two. Then, everywhere that a device input needs vcc, another
+named net device of type output will be created named "vcc" and
+connected to the device input that needs vcc.
+Visually there is no line connecting the vcc device and the input pin.
 
 ---
 
@@ -195,12 +223,12 @@ functions: `xxxGeometry()`, `renderXxxCanvas()`, `renderXxxSVG()`.
 
 ### Architecture: geometry/render separation
 
-- `xxxGeometry(ox, oy, name, ...params)` — computes all shape coordinates,
+* `xxxGeometry(ox, oy, name, ...params)` — computes all shape coordinates,
   label positions, and pin endpoints in canvas space. Returns a plain data
   structure. Pure function, no side effects.
-- `renderXxxCanvas(ctx, geo, fg, mid, bg)` — consumes geometry, issues
+* `renderXxxCanvas(ctx, geo, fg, mid, bg)` — consumes geometry, issues
   canvas 2D draw calls.
-- `renderXxxSVG(geo, fg, mid, bg)` — consumes same geometry, returns SVG
+* `renderXxxSVG(geo, fg, mid, bg)` — consumes same geometry, returns SVG
   element strings. Identical visual output to canvas version.
 
 This separation means geometry is computed once and reused for both
@@ -213,13 +241,13 @@ statements — makes adding new device types trivial.
 
 ### Shared helpers
 
-- `_renderShapesCanvas(ctx, shapes, fg, bg)` — renders rect/circle/line/polygon/clockTriangle
-- `_renderShapesSVG(shapes, fg, bg)` — same for SVG
-- `_renderLabelsCanvas(ctx, labels, fg, mid)` — renders name and pin labels
-- `_renderLabelsSVG(labels, fg, mid)` — same for SVG
-- `_l2c(pivotX, pivotY, totalW, totalH, cos, sin, lx, ly)` — transforms
+* `_renderShapesCanvas(ctx, shapes, fg, bg)` — renders rect/circle/line/polygon/clockTriangle
+* `_renderShapesSVG(shapes, fg, bg)` — same for SVG
+* `_renderLabelsCanvas(ctx, labels, fg, mid)` — renders name and pin labels
+* `_renderLabelsSVG(labels, fg, mid)` — same for SVG
+* `_l2c(pivotX, pivotY, totalW, totalH, cos, sin, lx, ly)` — transforms
   local symbol coordinates to canvas space with rotation
-- `_mirrorBoxGeo(geo, axisX)` — flips a geometry object horizontally
+* `_mirrorBoxGeo(geo, axisX)` — flips a geometry object horizontally
   around axisX; used by all box devices to implement 'left' orientation
 
 ### Style globals
@@ -235,16 +263,16 @@ device geometry functions.
 Per-device shapes, pin layouts, orientation support, and rendering logic
 are defined in `ldraw.html` (the block comments above each geometry function
 document the pin assignments and visual conventions). That file is the
-authoritative source for all component rendering details.
+authoritative source for all device rendering details.
 
 Key conventions enforced across all devices:
 
-- A device's "natural" orientation has primary outputs pointing right.
+* A device's "natural" orientation has primary outputs pointing right.
   "fixed" = right only; "mirror" = right or left; "all 4" = right/left/up/down.
-- `nand`, `led`, and `swtch` support all 4 orientations.
-- Box devices (`clk`, `mem`, `srlatch`, `dflipflop`, `reg`, `panel`, `addword`, `addbit`) support mirror orientation.
-- `gnd` and `vcc` are fixed orientation.
-- Edge-triggered clock inputs use a `clockTriangle` shape instead of a pin label.
+* `nand`, `led`, and `swtch` support all 4 orientations.
+* Box devices (`clk`, `mem`, `srlatch`, `dflipflop`, `reg`, `panel`, `addword`, `addbit`) support mirror orientation.
+* `gnd` and `vcc` are fixed orientation.
+* Edge-triggered clock inputs use a `clockTriangle` shape instead of a pin label.
 
 ---
 
@@ -258,29 +286,6 @@ No other code changes required.
 
 ---
 
-## Named Nets
-
-In standard EDA tools this is called "net labels". Some wires are not drawn
-as routed lines but as named stubs — an arrowhead pointing at a label. Any
-pin connecting to the same label name is logically wired, without a visible
-routed wire.
-
-- Any output can define a named net (e.g. clock's q0 → net "clock-q").
-  Any input connecting to it renders as an arrow stub with that label.
-- The named-net property belongs on the **wire**, not the device.
-- Initially all wires are routed visibly. User can later mark a wire as a
-  named net and assign a label string.
-- No .lsim syntax for this — it is drawing-layer metadata only.
-- The drawing save format must store named-net assignments alongside
-  component positions and wire waypoints.
-
-`gnd` and `vcc` receive no special treatment. They are ordinary components
-that must be placed and wired like any other device. If their wires are
-converted to named nets, consuming inputs render as arrow stubs with the
-net label — the same mechanism used for all other named nets.
-
----
-
 ## Open Design Questions
 
 These items were identified during review and need resolution.
@@ -290,49 +295,39 @@ These items were identified during review and need resolution.
 Each pin's geometry includes a connection point (the tip of its stub line,
 stored in `pins[id] = {x, y}`). Wires attach at this point. The first
 run of a wire leaving an output pin must travel in the direction the stub
-points (away from the component body). Same constraint applies to the
+points (away from the device body). Same constraint applies to the
 last run arriving at an input pin.
 
 ### Grid and snapping
 
-Not yet defined. For clean Manhattan routing, a snap-to-grid system is
-almost certainly needed. Candidate: define a grid pitch (e.g. 10 px) and
-snap all component positions, waypoints, and branch points to grid
-intersections.
+Clean Manhattan routing, a snap-to-grid system is
+almost certainly needed. Define a grid pitch (e.g. 10 px) and
+snap all device positions, waypoints, and branch points to grid
+intersections. It is the pins that must be exactly on grid;
+the device shape does not have to be.
 
 ### Z-order / draw order
 
-Not yet defined. Typical convention: wires drawn first, components on top.
-Wire crossings shown with a small gap or bridge on the lower wire (or simply
-drawn as a plain cross — TBD).
+Wires drawn first, devices on top.
+Wire crossings shown as a plain cross (no gaps, no "hop" arcs).
 
-### .ldraw save format
+### `.ldraw` save format
 
-Must store at minimum: component positions and orientations, wire trees
-(segment waypoints, branch point locations, pin attachments), and
-named-net assignments.
+Must store at minimum: device positions and orientations, wire trees
+(segment waypoints, branch point locations, pin attachments).
 
-**Resolved:** Format is pretty-printed JSON. Schema not yet defined.
+Format is pretty-printed JSON. Schema not yet defined.
 
 ### SVG export scope
 
-Not yet defined. Likely: export only placed components and their attached
-wires (complete or incomplete). Unplaced components excluded.
+Export only placed devices and their attached wires (complete or incomplete).
 
-### Include (`i`) command namespacing
+### Device Repositioning
 
-The `i` command loads another .lsim file recursively. If two included files
-define a device with the same name, is that an error? Are names prefixed
-with the include path? This is an .lsim language question, but ldraw must
-handle it correctly during parsing.
-
-### Component repositioning
-
-**Resolved:** Yes, placed components can be moved (left-click drag).
+**Resolved:** Yes, placed devices can be moved (left-click drag).
 Attached segments remain in place but become floating (disconnected
-from the moved component's pins). No rubber-banding — reconnection is
-manual. Components can also be returned to the unplaced list via
-right-click context menu; same breakage rules apply.
+from the moved device's pins). No rubber-banding — reconnection is
+manual.
 
 ---
 
@@ -350,85 +345,143 @@ security). The user confirms each file load via a picker dialog.
 
 ### File Loading
 
-Two load operations at startup, both via File System Access API pickers:
+Zero or one load operation at startup via File System Access API pickers:
 
-1. **Load .lsim** (required) — parses circuit structure.
-2. **Load .ldraw** (optional) — restores previous drawing state. If
-   skipped, internal state initializes with all components and connections
-   unplaced and no wires.
+* **Load `.ldraw`** (optional) — restores previous drawing state.
 
-Drag-and-drop is also supported: user can drop one or both files onto
-the canvas area. Files are distinguished by extension.
+Drag-and-drop is also supported: user can drop the `.ldraw` file into
+the canvas area.
 
 ### Saving
 
-Two independent save operations, each triggered separately:
+Three independent save operations, each triggered separately:
 
-- **Save .ldraw** — serializes drawing state (component positions,
+* **Save `.ldraw`** — serializes drawing state (device positions,
   orientations, wire trees, named-net assignments). Format is
   pretty-printed JSON for human readability and diff-friendliness.
-- **Export .svg** — exports current canvas as SVG.
+* **Export `.svg`** — exports current canvas as SVG.
+* **Export `.lsim`** — exports current circuit as lsim definition file.
 
-These are deliberately not bundled. The user may save .ldraw frequently
-while working and only export .svg occasionally, or vice versa.
+These are deliberately not bundled. The user may save `.ldraw` frequently
+while working and only export `.svg` occasionally, or vice versa.
 
 ### Typical Workflow
 
-1. Launch tool, load .lsim, optionally load .ldraw.
-2. Place components, route wires, edit drawing.
-3. Save .ldraw and/or export .svg as desired.
-4. Return to step 2 or close.
+1. Launch tool, optionally load `.ldraw`.
+2. Place devices, route wires, edit drawing.
+3. Save `.ldraw`.
+4. Optionally export `.svg` file.
+5. Optionally export `.lsim` file.
+6. Return to step 2 or close tool.
 
-Relaunch later: load same .lsim + saved .ldraw → resume at step 2.
+Relaunch later: load same `.ldraw`, and resume at step 2.
 
-### Component Placement — Unplaced View
+### Device Placement — Selection View
 
-A button labeled "Unplaced" switches the canvas to a dedicated view
-showing all unplaced components rendered with their symbols and names.
-Components are displayed in the order they appear in the .lsim file
-(or alphabetical if parse order isn't preserved). No filtering or
-sorting controls in v1 — can be added later if needed.
+A button labeled "Add" switches the canvas to a dedicated view
+showing all supported devices rendered with their symbols and names.
+Mouse pointer stays in same place on screen.
 
-The user clicks down on a component in this view. The mousedown:
-- Grabs the component.
-- Immediately repaints the canvas to the normal drawing view.
-- The component appears as a ghost image attached to the cursor at
+The user moves mouse to desired device and clicks down on a device in this view. The mousedown:
+* Grabs the device.
+* Immediately repaints the canvas to the normal drawing view.
+* The device appears as a ghost image attached to the cursor at
   the current mouse position (no spatial discontinuity — pointer
   stays in the same screen position across the repaint).
-- Component is in default 'right' orientation during placement.
+* Device is in default 'right' orientation during placement.
   Orientation is not changeable during the drag.
-- User moves the ghost to the desired position and releases.
-  The component is now placed.
+* User moves the ghost to the desired position and releases.
+  The device is now placed.
+* The device name defaults to a globally unique name consisting of the device type and a number that is incremented
+  each time a device of that type is created. Thus the first NAND gate will be named nand1.
+  Other device attribute default to reasonable values (two inputs for NAND, two bits for mem data and address, etc.).
 
 This interaction is deliberately consistent with the move interaction
 (see below).
 
-### Component Context Menu (Right-Click)
+If a device is released at a position that interferes with another device or wire segment, an error message
+is printed and it is automatically deleted (or just not created to begin with). This lack of user friendliness is acceptable.
 
-Right-clicking a placed component opens a context menu with:
+**Special size warning** - Devices are given a 2-unit extra size buffer along any edge that has pins.
+This is to allow a 1-unit wire segment to be connected to the pin without interfering with anything.
 
-- **Orientation** — submenu with right / left / up / down. Options
+### Device Context Menu (Right-Click)
+
+Right-clicking a placed device opens a context menu with:
+
+* **Change device parameters** - submenu for device name, number of inputs, outputs, address bits, etc.
+  The parameters required by the lsim language.
+  Changing some parameters will result in the pins moving.
+  If a pin attached to a wire segment moves, the wire segment is detached from the pin and becomes floating.
+  The wire segment remains stationary. No attempt will be made to rubber-band the segment.
+  If the attribute change would expand the size of the device and causes it to interfere with something else,
+  the change is un-done and an error is printed.
+* **Orientation** — submenu with right / left / up / down. Options
   that are not supported by the device type are greyed out.
-- **Unplace** — returns the component to the unplaced list.
+  The wire segment remains stationary. No attempt will be made to rubber-band the segment.
+  If a pin attached to a wire segment moves, the wire segment is detached from the pin and becomes floating.
+* **Delete** - the devices is deleted from the drawing. Any wire segments attached to pins will be deteched and become floating.
+* **Wire** - brings up submenu of each output pin that is currently floating. When selected, initiates wire creation.
+* **Net** - brings up submenu of each output pin that is currently floating. When selected, initiates "named net" creation.
 
-### Component Movement
+### Wire Creation
 
-Left-click and hold on a placed component picks it up as a ghost image.
+* Right-click on a device to bring up its context menu.
+* The "wire" submenu lists the floating output pins.
+* User selects one.
+* That output is re-drawn with a wire segment attached to it of length 1,
+  extending in the same direction as the output is pointing.
+
+This segment is currently the only segment of the wire object.
+It is "floating", meaning that its downstream side
+is not connected to anything.
+
+The floating end can be grabbed (left click) and extended or contracted (minimum length 1).
+
+If during extension the segment end is released and the resulting segment interferes with something,
+the operation is rolled back (the segment end snaps back to its original position) and an error is printed.
+Note that wires are allowed to cross other wires, but not at way points or branch points.
+Also, if at release the floating end of the wire segment is directly over a device input pin,
+a connection is established and the end is no longer floating (it's color should change to black).
+A dot should be drawn to indicate the connection.
+
+Right-click the wire segment brings up wire context menu.
+
+* **Turn right** - inserts a way point and extends one unit past that way point in the direction 90 degrees counter-clockwise.
+  If that extension interferes with something, the operation is un-done and an error is printed.
+* **Turn left** - inserts a way point and extends one unit past that way point in the direction 90 degrees clockwise.
+  If that extension interferes with something, the operation is un-done and an error is printed.
+* **Branch** - brings up a sub-menu of the different "T" shapes appropriate for this segment.
+  For example, if the floating end is pointing right, then the choices should be right-up-left, right-down-left,
+  or right-up-down. The "left-up-down" is greyed out.
+  On selection, a branch point is inserted and two new line segments are created, pointing in the desired directions.
+  Those two creations act the same as a normal segment creation - if either one interferes, the whole operation is
+  rolled back and an error is printed. However, in the specific case where the newly created segment ends on a device
+  input pin, it is immediately connected.
+  
+### Named Net Creation
+
+A named net is created via the context menu of 
+
+### Device Movement
+
+Left-click and hold on a placed device picks it up as a ghost image.
 Drag to new position, release to place. Same visual feedback as initial
 placement.
 
-**Wire breakage on move:** If the component has segments attached to
+**Wire breakage on move:** If the device has segments attached to
 its pins, those segments remain in place but their endpoints become
 floating (disconnected from the pin). The wire topology is otherwise
-preserved — only the attachment points to the moved component are
-broken. Even if the component is moved back to its original position,
+preserved — only the attachment points to the moved device are
+broken. Even if the device is moved back to its original position,
 segments remain disconnected and must be manually reconnected.
 
-This applies equally to Unplace — any attached segments become floating.
+If a device being moved is released at a position that interferes with another device or wire segment, an error message
+is printed and it is automatically snaps back to its original location. This lack of user friendliness is acceptable.
 
 ### Disconnected Segment Visual
 
-A segment that is not connected to a component pin or branch point on
+A segment that is not connected to a device pin or branch point on
 both ends is drawn in yellow (vs. the normal wire color). This provides
 a clear visual indicator of "broken" wires that need attention.
 
@@ -436,20 +489,21 @@ a clear visual indicator of "broken" wires that need attention.
 
 Left-click meaning depends on application state:
 
-- **Unplaced view:** mousedown on a component grabs it for placement.
-- **Normal drawing view, neutral mode:** left-click on a placed
-  component picks it up for movement.
-- **Wire routing mode (TBD):** left-click places waypoints or attaches
+* **New Device view:** mousedown on a device grabs it for placement
+  and changes to normal drawing view.
+* **Normal drawing view, neutral mode:** left-click on a
+  device picks it up for movement.
+* **Wire routing mode:** left-click places waypoints or attaches
   to pins.
 
 Care must be taken as wire routing is designed to ensure click targets
-are unambiguous — clicking on a component vs. clicking on empty canvas
+are unambiguous — clicking on a device vs. clicking on empty canvas
 vs. clicking on a wire must be clearly distinguishable by context/state.
 
 ---
 
 ## Wire Routing (possible future)
 
-- Initially: user specifies wire paths manually (click-to-place waypoints)
-- Future: automatic orthogonal routing ("good enough," not optimal)
-- Wires follow right-angle (Manhattan) paths
+* Initially: user specifies wire paths manually (click-to-place waypoints)
+* Future: automatic orthogonal routing ("good enough," not optimal)
+* Wires follow right-angle (Manhattan) paths
