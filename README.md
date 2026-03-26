@@ -1,6 +1,7 @@
-# lsim_draw — Implementation Notes
+# ldraw — Implementation Notes
 
 ## Purpose
+
 A schematic drawing tool for logic circuits, primarily used for visual
 troubleshooting during CPU design (hobby project — building a simple CPU
 entirely from NAND gates in software simulation). The goal is to visually trace
@@ -8,12 +9,13 @@ signals through a working or broken circuit, not produce publication-quality
 documentation.
 
 ## Background
+
 I wrote a digital logic hardware simulator. As part of that, I have a simple circuit
 definition language that defines components and the connections between
 them. A circuit will be defined with this language in a text file with
 the suffix ".lsim".
 
-The lsim_draw program will:
+The ldraw program will:
 1. Read a .lsim file and internalize the components and their interconnections.
 1. Provide a drawing canvas.
 1. Initially all components are "not placed" and all connections are "not made".
@@ -29,6 +31,18 @@ Details of each function will be provided.
 
 ---
 
+## Definitions
+
+These terms will be use carefully and unambiguously in this document to mean only what is defined here.
+
+* Component - a device created by a "d" command in a .lsim file.
+* Connection - an association between a component output and a component input created by a "c" command in a .lsim file.
+* Wire - an object created by ldraw. See (Data Model)[#data_model] below.
+* Segment - an object created by ldraw. See (Data Model)[#data_model] below.
+* Branch point - an object created by ldraw. See (Data Model)[#data_model] below.
+* Upstream - the end of a segment that is graphically closer to the driving component's output.
+* Downstream - the end of a segment that is graphically closer to the consuming components' inputs.
+
 ## Implementation Environment
 
 A single self-contained `.html` file, opened directly in Chrome from the
@@ -39,11 +53,14 @@ All rendering, interaction, and application logic is in HTML, CSS, and
 JavaScript within this single file.
 
 ### File I/O
+
 Uses the browser's **File System Access API** (Chrome):
+
 - **Read**: user selects a file via picker; app reads contents as text
 - **Write**: user selects destination; app writes text content directly
 
 ### Constraints
+
 - Chrome is the target browser
 - No persistent storage between sessions; all state lives in memory
 - All file paths chosen interactively via browser file pickers
@@ -62,12 +79,13 @@ parses only structural commands:
 All other commands (`p`, `t`, `m`, `l`, `v`, `w`, `q`) are ignored.
 
 Note that there is a `b` command for Bus (multi-bit connection).
-For now lsim_draw will issue an error message if the .lsim file uses it.
+For now ldraw will issue an error message if the .lsim file uses it.
 
 Of the devices that can be defined, the `probe` is silently ignored — they are simulator debugging
 tools with no schematic representation.
 
 ### Pin naming convention
+
 Pin IDs are a letter followed by a number (e.g. `i0`, `q0`, `R0`).
 **Upper-case letter = active-low (inverted) signal.**
 Any pin whose id starts with upper-case automatically gets an inversion
@@ -78,6 +96,7 @@ bubble in the rendered symbol. Universal rule, no per-device specification.
 ## Data Model
 
 ### Components
+
 Each parsed `d` command creates a component object:
 - `type` — device type string (e.g. `nand`, `dflipflop`, `reg`)
 - `name` — unique instance name
@@ -98,23 +117,34 @@ at "branch points", represented visually as dots.
 Each branch point has one upstream line segment and two downstream line segments.
 The root of the tree is the output of a component and the leaves are
 the inputs that it connects to.
-Note that segments must not be co-linear. A branch point is visually a "T" junction
-that can be in any of the 4 orientations.
+Note that segments must not overlap. They are allowed to cross without connection (a "+" junction visually).
+A branch point is visually a "T" junction that can be in any of the 4 orientations.
 
 A wire is internally represented as:
-- A component output (the root)
-- A list of segments
+- A reference to a component output (root of the tree)
+- A binary tree of segments. Each node references a branch point.
 
-There is also a global list of branch points that the program adds to and deletes from as needed.
+A branch point contains references to the three segment ends that connect to it:
+- upstream (toward the driving component's output).
+- downstream A.
+- downstream B.
 
 A segment has two ends (upstream and downstream) and a list of waypoints for direction changes.
 Each segment end connects to either a component output, a component input, or a branch point.
+It also contains a reference to the wire that it's part of.
+
+Each component's inputs and outputs contain references to the wire and segment end they connect to.
 
 For this version of the tool, the creation of wires, segments, branch points, and way points are
 created by user action, not generated automatically by the tool (no auto routing).
 
 See "Named Nets" below for wires that are drawn differently. The underlying structure is the
 same, but the visual representation is different.
+
+During operation, a wire is created at an output pin of a component. It can be in an incomplete state,
+meaning that it contains segments with "floating" downstream ends (not yet connected to any thing).
+This is a normal state of affairs. A wire is termed complete when it fully represents the set of
+connections made to that wire's component output.
 
 ### Connections
 
@@ -123,23 +153,30 @@ A completed wire will embody one or more connections. Specifically, a wire will 
 made to a specific component output. The wire will be named "wire:<output-component-name>.<output-component-pin>".
 
 ### Component State
+
 - **Placed** components: have an x,y position; geo is computed
 - **Unplaced** components: parsed but not yet positioned; shown in a pending list
 
 ### Connection State
-- **Unplaced** connection: No wires.
-- **InProgress** connection: Included in a wire (which connects to a component's output) but not
-yet connected to that connection's destination component's input.
--- **Placed** connection: Included in a wire that has a segment connected to the destination component's input.
+
+- **Unplaced** connections: are not represented by any wire.
+- **Placed** connections: A wire connects to the output,input pair associated with the connection.
+
+ldraw maintains a list of connections and components in the "unplaced" state.
+- The user directly places components manually with a mouse.
+- The user places connections indirectly by creating wires.
+I.e. the user does not select a connection to work on it.
+ldraw infers which connections are placed as the user adds segments to a wire and connects segments to inputs.
 
 ---
 
-## Symbol Library (`lsim_draw_lib.html`)
+## Symbol Library
 
-All symbols are implemented in the library file. Each device type has three
+Each device type has three
 functions: `xxxGeometry()`, `renderXxxCanvas()`, `renderXxxSVG()`.
 
 ### Architecture: geometry/render separation
+
 - `xxxGeometry(ox, oy, name, ...params)` — computes all shape coordinates,
   label positions, and pin endpoints in canvas space. Returns a plain data
   structure. Pure function, no side effects.
@@ -157,6 +194,7 @@ keyed by device type string. Use these for dispatch instead of switch
 statements — makes adding new device types trivial.
 
 ### Shared helpers
+
 - `_renderShapesCanvas(ctx, shapes, fg, bg)` — renders rect/circle/line/polygon/clockTriangle
 - `_renderShapesSVG(shapes, fg, bg)` — same for SVG
 - `_renderLabelsCanvas(ctx, labels, fg, mid)` — renders name and pin labels
@@ -165,6 +203,7 @@ statements — makes adding new device types trivial.
   local symbol coordinates to canvas space with rotation
 
 ### Style globals
+
 `SYM_FG`, `SYM_MID`, `SYM_BG` — set via `symSetColors(fg, mid, bg)` at
 startup. Separate from CSS; used by both canvas and SVG renderers.
 
@@ -221,18 +260,17 @@ addbit is addword with numBits=1. Carry chain flows bottom-to-bottom
 when cascading adders left-to-right.
 
 ### Clock triangle
+
 Edge-triggered clock inputs use a triangle symbol instead of a label:
 - Left edge entry: triangle points right (into box) — `dir:'right'`
 - Top edge entry: triangle points down (into box) — `dir:'down'`
 Shape type `clockTriangle` is handled by both canvas and SVG shared renderers.
 
 ### NAND gate specifics
+
 - Input count drives body height; pins evenly spaced on input edge
 - 1-input NAND (inverter) uses same body shape
 - Future: threshold (~5 inputs) above which fallback to labeled box with bubble
-
-### Bus rendering
-A `b` connection renders as a thicker wire. Not yet implemented.
 
 ---
 
@@ -278,10 +316,3 @@ TBD
 - Initially: user specifies wire paths manually (click-to-place waypoints)
 - Future: automatic orthogonal routing ("good enough," not optimal)
 - Wires follow right-angle (Manhattan) paths
-
----
-
-## What Has Been Done (for future Claude sessions)
-
-The symbol library (`lsim_draw_lib.html`) is complete for all current device
-types. All symbols have been visually approved.
