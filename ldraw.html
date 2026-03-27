@@ -2,529 +2,359 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>lsim_draw symbol library</title>
+<title>ldraw — logic circuit editor</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:#e8e6df; font-family:sans-serif; }
+
+#canvas { display:block; cursor:default; }
+#logPanel {
+  position:fixed; bottom:0; left:0; right:0; height:44px;
+  background:#141412; border-top:1px solid #555; overflow-y:auto;
+  font-family:monospace; font-size:11px; color:#9fba8f; padding:2px 6px;
+  z-index:5; user-select:text;
+}
+#paramPopup {
+  display:none; position:fixed; background:#fff; border:1px solid #666;
+  border-radius:4px; padding:10px; box-shadow:2px 2px 8px rgba(0,0,0,0.3);
+  font-size:13px; z-index:10; min-width:160px;
+}
+#paramPopup h3 { margin:0 0 8px; font-size:14px; }
+#paramPopup label { display:block; margin:4px 0 2px; font-size:12px; color:#444; }
+#paramPopup select, #paramPopup input[type=number] {
+  width:100%; padding:2px 4px; font-size:13px; border:1px solid #aaa; border-radius:2px;
+}
+#paramPopup .pp-row { margin-bottom:6px; }
+#ctxMenu {
+  display:none; position:fixed; background:#fff; border:1px solid #888;
+  border-radius:4px; padding:3px 0; box-shadow:2px 4px 12px rgba(0,0,0,0.25);
+  z-index:20; min-width:160px; font-size:13px; user-select:none;
+}
+.ctx-item { padding:5px 16px; cursor:pointer; color:#222; }
+.ctx-item:hover { background:#e4eeff; }
+.ctx-sep { height:1px; background:#ddd; margin:3px 0; }
+</style>
 </head>
 <body>
+<canvas id="canvas"></canvas>
+<div id="ctxMenu">
+  <div class="ctx-item" id="ctx-add">Add device…</div>
+  <div class="ctx-item" id="ctx-pan">Pan to x, y…</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" id="ctx-load">Load…</div>
+  <div class="ctx-item" id="ctx-save">Save</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" id="ctx-redraw">Redraw</div>
+</div>
+<div id="paramPopup"></div>
+<div id="logPanel"></div>
+
 <script>
-
 // =============================================================================
-// SYMBOL LIBRARY — lsim_draw
-// =============================================================================
-// Each symbol has three functions:
-//   xxxGeometry(ox, oy, name, ...typeSpecificParams)
-//     -> geometry object (shapes, labels, pins) in canvas space
-//   renderXxxCanvas(ctx, geo, fg, mid, bg)
-//     -> draws onto a canvas 2D context
-//   renderXxxSVG(geo, fg, mid, bg)
-//     -> returns SVG element string
-//
-// Common geometry parameters:
-//   ox, oy  - top-left origin of the symbol bounding box on the canvas
-//   name    - instance name string, drawn centered on body, always upright
-//
-// Orientation:
-//   nand, led, swtch, netsource, netsink accept orientation: 'right'|'left'|'up'|'down'
-//   Box devices (clk, mem, srlatch, dflipflop, reg, panel, addword, addbit)
-//     accept orientation: 'right'|'left' (mirror)
-//   gnd, vcc are fixed orientation (no rotation).
-//
-// Pin ids match circuit-language-docs.md exactly.
-// pins[id] = { x, y } — canvas-space wire connection point (stub endpoint).
-//
-// Inversion bubbles: any pin id starting with upper-case = active-low,
-// automatically gets a bubble. Universal rule, no per-device specification.
-//
-// Ignored devices: `probe` is silently ignored during parsing.
-//
-// Completed symbols:
-//   nand, led, swtch, gnd, vcc, clk, mem, srlatch, dflipflop, reg, panel,
-//   addbit (= addword with numBits=1), addword, netsource, netsink
-//
-// Not yet implemented:
-//   Bus rendering (thick wires for `b` commands)
-//   Wire routing (manual waypoints and future auto-router)
-//   Component placement, drag, and edit interactions
+// SYMBOL LIBRARY
+// Pin-to-grid guarantee: with ox/oy snapped to PIN_SPACE multiples, every
+// pin tip also lands on a PIN_SPACE multiple.
+//   STUB   = PIN_SPACE     = 20  (plain stub)
+//   BUBBLE = PIN_SPACE / 2 = 10  (inversion bubble; effective reach = STUB+2*BUBBLE = 40)
+// Box widths/heights are multiples of PIN_SPACE.
+// NAND internal pitch = 2*PIN_SPACE so arc centre is always on grid.
 // =============================================================================
 
-// --- Style globals (set by application at startup) --------------------------
-let SYM_FG  = '#2c2c2a';   // stroke and name-label color (default)
-let SYM_MID = '#5f5e5a';   // pin-label color (default)
-let SYM_BG  = '#f1efe8';   // body fill
+let SYM_FG  = '#2c2c2a';
+let SYM_MID = '#5f5e5a';
+let SYM_BG  = '#f1efe8';
+function symSetColors(fg,mid,bg){SYM_FG=fg;SYM_MID=mid;SYM_BG=bg;}
 
-// Per-component state colors — passed as fg/mid to render functions.
-// "Complete" = all connections wired; "Incomplete" = has floating inputs.
-const SYM_COMPLETE_FG  = '#000000';
-const SYM_COMPLETE_MID = '#333333';
-const SYM_INCOMPLETE_FG  = '#b8860b';   // dark goldenrod — visible on SYM_BG
-const SYM_INCOMPLETE_MID = '#c49b2a';
+const PIN_SPACE = 20;
+const STUB   = PIN_SPACE;       // 20
+const BUBBLE = PIN_SPACE / 2;  // 10
 
-const PIN_SPACE = 20;       // default pin-to-pin spacing for box devices
-
-function symSetColors(fg, mid, bg) {
-  SYM_FG = fg;  SYM_MID = mid;  SYM_BG = bg;
+// --- Shared helpers ---
+function _l2c(pvX,pvY,tW,tH,cos,sin,lx,ly){
+  const dx=lx-tW/2,dy=ly-tH/2;
+  return [pvX+dx*cos-dy*sin, pvY+dx*sin+dy*cos];
 }
+function _p(n){return Math.round(n*100)/100;}
 
-// --- Shared helpers ---------------------------------------------------------
-
-function _l2c(pivotX, pivotY, totalW, totalH, cos, sin, lx, ly) {
-  const dx = lx - totalW/2, dy = ly - totalH/2;
-  return [pivotX + dx*cos - dy*sin, pivotY + dx*sin + dy*cos];
-}
-
-function _p(n) { return Math.round(n*100)/100; }
-
-function _renderShapesCanvas(ctx, shapes, fg, bg) {
-  for (const s of shapes) {
+function _renderShapesCanvas(ctx,shapes,fg,bg){
+  for(const s of shapes){
     ctx.lineWidth=s.lineWidth; ctx.strokeStyle=fg; ctx.fillStyle=bg;
-    if (s.type==='rect') {
-      ctx.fillRect(s.x,s.y,s.w,s.h); ctx.strokeRect(s.x,s.y,s.w,s.h);
-    } else if (s.type==='circle') {
-      ctx.beginPath(); ctx.arc(s.cx,s.cy,s.r,0,Math.PI*2); ctx.fill(); ctx.stroke();
-    } else if (s.type==='line') {
-      ctx.beginPath(); ctx.moveTo(s.x1,s.y1); ctx.lineTo(s.x2,s.y2); ctx.stroke();
-    } else if (s.type==='polygon') {
-      ctx.beginPath();
-      ctx.moveTo(s.points[0][0],s.points[0][1]);
-      for (let i=1;i<s.points.length;i++) ctx.lineTo(s.points[i][0],s.points[i][1]);
-      ctx.closePath(); ctx.fillStyle='transparent'; ctx.fill(); ctx.stroke();
-    } else if (s.type==='clockTriangle') {
-      const {x,y,size,dir}=s;
-      ctx.beginPath();
-      if (dir==='down') {
-        ctx.moveTo(x-size,y); ctx.lineTo(x,y+size*1.4); ctx.lineTo(x+size,y);
-      } else if (dir==='left') {
-        ctx.moveTo(x,y-size); ctx.lineTo(x-size*1.4,y); ctx.lineTo(x,y+size);
-      } else {
-        ctx.moveTo(x,y-size); ctx.lineTo(x+size*1.4,y); ctx.lineTo(x,y+size);
-      }
-      ctx.closePath(); ctx.fillStyle='transparent'; ctx.fill(); ctx.stroke();
+    if(s.type==='rect'){ctx.fillRect(s.x,s.y,s.w,s.h);ctx.strokeRect(s.x,s.y,s.w,s.h);}
+    else if(s.type==='circle'){ctx.beginPath();ctx.arc(s.cx,s.cy,s.r,0,Math.PI*2);ctx.fill();ctx.stroke();}
+    else if(s.type==='line'){ctx.beginPath();ctx.moveTo(s.x1,s.y1);ctx.lineTo(s.x2,s.y2);ctx.stroke();}
+    else if(s.type==='polygon'){
+      ctx.beginPath();ctx.moveTo(s.points[0][0],s.points[0][1]);
+      for(let i=1;i<s.points.length;i++)ctx.lineTo(s.points[i][0],s.points[i][1]);
+      ctx.closePath();ctx.fillStyle='transparent';ctx.fill();ctx.stroke();
+    }else if(s.type==='clockTriangle'){
+      const{x,y,size,dir}=s;ctx.beginPath();
+      if(dir==='down'){ctx.moveTo(x-size,y);ctx.lineTo(x,y+size*1.4);ctx.lineTo(x+size,y);}
+      else if(dir==='left'){ctx.moveTo(x,y-size);ctx.lineTo(x-size*1.4,y);ctx.lineTo(x,y+size);}
+      else{ctx.moveTo(x,y-size);ctx.lineTo(x+size*1.4,y);ctx.lineTo(x,y+size);}
+      ctx.closePath();ctx.fillStyle='transparent';ctx.fill();ctx.stroke();
     }
   }
 }
-
-function _renderShapesSVG(shapes, fg, bg) {
+function _renderShapesSVG(shapes,fg,bg){
   const out=[];
-  for (const s of shapes) {
-    if (s.type==='rect') {
-      out.push(`<rect x="${_p(s.x)}" y="${_p(s.y)}" width="${_p(s.w)}" height="${_p(s.h)}" fill="${bg}" stroke="${fg}" stroke-width="${s.lineWidth}"/>`);
-    } else if (s.type==='circle') {
-      out.push(`<circle cx="${_p(s.cx)}" cy="${_p(s.cy)}" r="${_p(s.r)}" fill="${bg}" stroke="${fg}" stroke-width="${s.lineWidth}"/>`);
-    } else if (s.type==='line') {
-      out.push(`<line x1="${_p(s.x1)}" y1="${_p(s.y1)}" x2="${_p(s.x2)}" y2="${_p(s.y2)}" stroke="${fg}" stroke-width="${s.lineWidth}" stroke-linecap="round"/>`);
-    } else if (s.type==='polygon') {
-      const pts=s.points.map(p=>`${_p(p[0])},${_p(p[1])}`).join(' ');
-      out.push(`<polygon points="${pts}" fill="none" stroke="${fg}" stroke-width="${s.lineWidth}" stroke-linejoin="round"/>`);
-    } else if (s.type==='clockTriangle') {
-      const {x,y,size,dir}=s;
-      let pts;
-      if (dir==='down') pts=`${_p(x-size)},${_p(y)} ${_p(x)},${_p(y+size*1.4)} ${_p(x+size)},${_p(y)}`;
-      else if (dir==='left') pts=`${_p(x)},${_p(y-size)} ${_p(x-size*1.4)},${_p(y)} ${_p(x)},${_p(y+size)}`;
-      else              pts=`${_p(x)},${_p(y-size)} ${_p(x+size*1.4)},${_p(y)} ${_p(x)},${_p(y+size)}`;
+  for(const s of shapes){
+    if(s.type==='rect')out.push(`<rect x="${_p(s.x)}" y="${_p(s.y)}" width="${_p(s.w)}" height="${_p(s.h)}" fill="${bg}" stroke="${fg}" stroke-width="${s.lineWidth}"/>`);
+    else if(s.type==='circle')out.push(`<circle cx="${_p(s.cx)}" cy="${_p(s.cy)}" r="${_p(s.r)}" fill="${bg}" stroke="${fg}" stroke-width="${s.lineWidth}"/>`);
+    else if(s.type==='line')out.push(`<line x1="${_p(s.x1)}" y1="${_p(s.y1)}" x2="${_p(s.x2)}" y2="${_p(s.y2)}" stroke="${fg}" stroke-width="${s.lineWidth}" stroke-linecap="round"/>`);
+    else if(s.type==='polygon'){const pts=s.points.map(p=>`${_p(p[0])},${_p(p[1])}`).join(' ');out.push(`<polygon points="${pts}" fill="none" stroke="${fg}" stroke-width="${s.lineWidth}" stroke-linejoin="round"/>`);}
+    else if(s.type==='clockTriangle'){
+      const{x,y,size,dir}=s;let pts;
+      if(dir==='down')pts=`${_p(x-size)},${_p(y)} ${_p(x)},${_p(y+size*1.4)} ${_p(x+size)},${_p(y)}`;
+      else if(dir==='left')pts=`${_p(x)},${_p(y-size)} ${_p(x-size*1.4)},${_p(y)} ${_p(x)},${_p(y+size)}`;
+      else pts=`${_p(x)},${_p(y-size)} ${_p(x+size*1.4)},${_p(y)} ${_p(x)},${_p(y+size)}`;
       out.push(`<polygon points="${pts}" fill="none" stroke="${fg}" stroke-width="${s.lineWidth}" stroke-linejoin="round"/>`);
     }
   }
   return out;
 }
-
-function _renderLabelsCanvas(ctx, labels, fg, mid) {
-  for (const l of labels) {
-    ctx.fillStyle    = l.kind==='name' ? fg : mid;
-    ctx.font         = l.kind==='name' ? 'bold 11px sans-serif' : '10px sans-serif';
-    ctx.textAlign    = l.align||'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(l.text, l.x, l.y);
+function _renderLabelsCanvas(ctx,labels,fg,mid){
+  for(const l of labels){
+    ctx.fillStyle=l.kind==='name'?fg:mid;
+    ctx.font=l.kind==='name'?'bold 11px sans-serif':'10px sans-serif';
+    ctx.textAlign=l.align||'center';ctx.textBaseline='middle';
+    ctx.fillText(l.text,l.x,l.y);
   }
 }
-
-function _renderLabelsSVG(labels, fg, mid) {
-  return labels.map(l => {
-    const fill   = l.kind==='name' ? fg : mid;
-    const weight = l.kind==='name' ? 'bold' : 'normal';
-    const size   = l.kind==='name' ? 11 : 10;
-    const anchor = l.align==='left' ? 'start' : l.align==='right' ? 'end' : 'middle';
+function _renderLabelsSVG(labels,fg,mid){
+  return labels.map(l=>{
+    const fill=l.kind==='name'?fg:mid,weight=l.kind==='name'?'bold':'normal',size=l.kind==='name'?11:10;
+    const anchor=l.align==='left'?'start':l.align==='right'?'end':'middle';
     return `<text x="${_p(l.x)}" y="${_p(l.y)}" font-family="sans-serif" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}" dominant-baseline="central">${l.text}</text>`;
   });
 }
-
-// --- Mirror helper for box devices (right ↔ left) ---------------------------
-
-function _mirrorBoxGeo(geo, axisX) {
-  function mx(x) { return 2 * axisX - x; }
-
-  for (const s of geo.shapes) {
-    if (s.type==='rect') {
-      s.x = mx(s.x + s.w);          // mirror right edge becomes new left edge
-    } else if (s.type==='circle') {
-      s.cx = mx(s.cx);
-    } else if (s.type==='line') {
-      s.x1 = mx(s.x1); s.x2 = mx(s.x2);
-    } else if (s.type==='polygon') {
-      for (const p of s.points) p[0] = mx(p[0]);
-    } else if (s.type==='clockTriangle') {
-      s.x = mx(s.x);
-      if (s.dir==='right') s.dir='left';
-      else if (s.dir==='left') s.dir='right';
-    }
+function _mirrorBoxGeo(geo,axisX){
+  function mx(x){return 2*axisX-x;}
+  for(const s of geo.shapes){
+    if(s.type==='rect'){s.x=mx(s.x+s.w);}
+    else if(s.type==='circle'){s.cx=mx(s.cx);}
+    else if(s.type==='line'){s.x1=mx(s.x1);s.x2=mx(s.x2);}
+    else if(s.type==='polygon'){for(const p of s.points)p[0]=mx(p[0]);}
+    else if(s.type==='clockTriangle'){s.x=mx(s.x);if(s.dir==='right')s.dir='left';else if(s.dir==='left')s.dir='right';}
   }
-  for (const l of geo.labels) {
-    l.x = mx(l.x);
-    if (l.align==='left') l.align='right';
-    else if (l.align==='right') l.align='left';
-  }
-  for (const key of Object.keys(geo.pins)) {
-    geo.pins[key].x = mx(geo.pins[key].x);
-  }
+  for(const l of geo.labels){l.x=mx(l.x);if(l.align==='left')l.align='right';else if(l.align==='right')l.align='left';}
+  for(const k of Object.keys(geo.pins))geo.pins[k].x=mx(geo.pins[k].x);
   return geo;
 }
 
 // =============================================================================
 // NAND GATE
+// PITCH = PIN_SPACE (20px per input row).
+// Floor at max(numInputs, 2) so 1-input == 2-input size (item 8).
+// pinStart = PIN_SPACE/2 centers pins in rows; pins land at 10px multiples.
+// Output arc centre at bodyH/2, on 20px grid when max(numInputs,2) is even.
+// For odd numInputs>=3 the output is 10px off grid — accepted limitation.
 // =============================================================================
-// IEEE-style. numInputs >= 1 (1-input = inverter, same body).
-// Pins: i0..i(n-1) input side, o0 output side (after bubble).
-// Supports all four orientations.
-// =============================================================================
-
-function nandGeometry(ox, oy, name, orientation, numInputs) {
-  const PIN_SPACING=20, MIN_HEIGHT=50;
-  const bodyH=Math.max(MIN_HEIGHT,numInputs*PIN_SPACING);
-  const arcR=bodyH/2, arcCx=bodyH*0.4, arcCy=bodyH/2;
+function nandGeometry(ox,oy,name,orientation,numInputs){
+  const PITCH=PIN_SPACE;
+  const rows=Math.max(numInputs,2);
+  const bodyH=rows*PITCH;
+  const arcR=bodyH/2,arcCx=bodyH*0.4,arcCy=bodyH/2;
   const arcRightX=arcCx+arcR;
-  const bubbleR=6, bubbleCx=arcRightX+bubbleR, bubbleCy=arcCy;
-  const pinStub=18, totalW=bubbleCx+bubbleR+pinStub, totalH=bodyH;
-  const pinStart=(bodyH-(numInputs-1)*PIN_SPACING)/2;
-
+  const bubbleCx=arcRightX+BUBBLE,bubbleCy=arcCy;
+  const outBase=bubbleCx+BUBBLE;
+  const totalW=Math.ceil(outBase/PIN_SPACE)*PIN_SPACE+PIN_SPACE;
+  const totalH=bodyH;
+  const pinStart=PIN_SPACE/2;
   const angles={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2};
   const angle=angles[orientation]??0;
-  const cos=Math.cos(angle), sin=Math.sin(angle);
-
+  const cos=Math.cos(angle),sin=Math.sin(angle);
   let pivotX,pivotY;
-  if (orientation==='right'||orientation==='left') {
-    pivotX=ox+totalW/2; pivotY=oy+totalH/2;
-  } else {
-    pivotX=ox+totalH/2; pivotY=oy+totalW/2;
-  }
-
-  function l2c(lx,ly) { return _l2c(pivotX,pivotY,totalW,totalH,cos,sin,lx,ly); }
-
+  if(orientation==='right'||orientation==='left'){pivotX=ox+totalW/2;pivotY=oy+totalH/2;}
+  else{pivotX=ox+totalH/2;pivotY=oy+totalW/2;}
+  function l2c(lx,ly){return _l2c(pivotX,pivotY,totalW,totalH,cos,sin,lx,ly);}
   const shapes=[];
   shapes.push({type:'nandBody',arcR,angle,
     topLeft:l2c(0,0),botLeft:l2c(0,bodyH),
     botArcStart:l2c(arcCx,bodyH),topArcEnd:l2c(arcCx,0),lineWidth:1.5});
   const [bcx,bcy]=l2c(bubbleCx,bubbleCy);
-  shapes.push({type:'circle',cx:bcx,cy:bcy,r:bubbleR,lineWidth:1.5});
-  for (let i=0;i<numInputs;i++) {
-    const py=pinStart+i*PIN_SPACING;
-    const [x1,y1]=l2c(-pinStub,py),[x2,y2]=l2c(0,py);
+  shapes.push({type:'circle',cx:bcx,cy:bcy,r:BUBBLE,lineWidth:1.5});
+  for(let i=0;i<numInputs;i++){
+    const py=pinStart+i*PITCH;
+    const [x1,y1]=l2c(-STUB,py),[x2,y2]=l2c(0,py);
     shapes.push({type:'line',x1,y1,x2,y2,lineWidth:1.5});
   }
-  const [lox1,loy1]=l2c(bubbleCx+bubbleR,bubbleCy);
-  const [lox2,loy2]=l2c(bubbleCx+bubbleR+pinStub,bubbleCy);
+  const [lox1,loy1]=l2c(outBase,bubbleCy),[lox2,loy2]=l2c(totalW,bubbleCy);
   shapes.push({type:'line',x1:lox1,y1:loy1,x2:lox2,y2:loy2,lineWidth:1.5});
-
   const [nlx,nly]=l2c(arcRightX/2,bodyH/2);
   const labels=[{x:nlx,y:nly,text:name,kind:'name',align:'center'}];
-
   const pins={};
-  for (let i=0;i<numInputs;i++) {
-    const py=pinStart+i*PIN_SPACING;
-    const [px,py2]=l2c(-pinStub,py);
+  for(let i=0;i<numInputs;i++){
+    const py=pinStart+i*PITCH;
+    const [px,py2]=l2c(-STUB,py);
     pins[`i${i}`]={x:px,y:py2};
   }
-  const [opx,opy]=l2c(bubbleCx+bubbleR+pinStub,bubbleCy);
+  const [opx,opy]=l2c(totalW,bubbleCy);
   pins['o0']={x:opx,y:opy};
-
-  return {totalW,totalH,pivotX,pivotY,shapes,labels,pins,angle};
+  return{totalW,totalH,pivotX,pivotY,shapes,labels,pins,angle};
 }
-
-function renderNandCanvas(ctx,geo,fg,mid,bg) {
-  for (const s of geo.shapes) {
-    ctx.lineWidth=s.lineWidth; ctx.strokeStyle=fg; ctx.fillStyle=bg;
-    if (s.type==='nandBody') {
-      ctx.save();
-      ctx.translate(geo.pivotX,geo.pivotY); ctx.rotate(geo.angle);
+function renderNandCanvas(ctx,geo,fg,mid,bg){
+  for(const s of geo.shapes){
+    ctx.lineWidth=s.lineWidth;ctx.strokeStyle=fg;ctx.fillStyle=bg;
+    if(s.type==='nandBody'){
+      ctx.save();ctx.translate(geo.pivotX,geo.pivotY);ctx.rotate(geo.angle);
       ctx.translate(-geo.totalW/2,-geo.totalH/2);
       const bodyH=geo.totalH,arcCx=bodyH*0.4,arcCy=bodyH/2;
-      ctx.beginPath();
-      ctx.moveTo(0,0); ctx.lineTo(0,bodyH); ctx.lineTo(arcCx,bodyH);
-      ctx.arc(arcCx,arcCy,s.arcR,Math.PI/2,-Math.PI/2,true);
-      ctx.lineTo(0,0); ctx.fill(); ctx.stroke();
+      ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(0,bodyH);ctx.lineTo(arcCx,bodyH);
+      ctx.arc(arcCx,arcCy,s.arcR,Math.PI/2,-Math.PI/2,true);ctx.lineTo(0,0);ctx.fill();ctx.stroke();
       ctx.restore();
-    } else if (s.type==='circle') {
-      ctx.beginPath(); ctx.arc(s.cx,s.cy,s.r,0,Math.PI*2); ctx.fill(); ctx.stroke();
-    } else if (s.type==='line') {
-      ctx.beginPath(); ctx.moveTo(s.x1,s.y1); ctx.lineTo(s.x2,s.y2); ctx.stroke();
-    }
+    }else if(s.type==='circle'){ctx.beginPath();ctx.arc(s.cx,s.cy,s.r,0,Math.PI*2);ctx.fill();ctx.stroke();}
+    else if(s.type==='line'){ctx.beginPath();ctx.moveTo(s.x1,s.y1);ctx.lineTo(s.x2,s.y2);ctx.stroke();}
   }
   _renderLabelsCanvas(ctx,geo.labels,fg,mid);
 }
-
-function renderNandSVG(geo,fg,mid,bg) {
+function renderNandSVG(geo,fg,mid,bg){
   const out=[];
-  for (const s of geo.shapes) {
-    if (s.type==='nandBody') {
-      const [tlx,tly]=s.topLeft,[blx,bly]=s.botLeft;
-      const [bax,bay]=s.botArcStart,[tax,tay]=s.topArcEnd;
+  for(const s of geo.shapes){
+    if(s.type==='nandBody'){
+      const [tlx,tly]=s.topLeft,[blx,bly]=s.botLeft,[bax,bay]=s.botArcStart,[tax,tay]=s.topArcEnd;
       const d=`M ${_p(tlx)} ${_p(tly)} L ${_p(blx)} ${_p(bly)} L ${_p(bax)} ${_p(bay)} A ${_p(s.arcR)} ${_p(s.arcR)} 0 0 0 ${_p(tax)} ${_p(tay)} Z`;
       out.push(`<path d="${d}" fill="${bg}" stroke="${fg}" stroke-width="${s.lineWidth}" stroke-linejoin="round"/>`);
-    } else {
-      out.push(..._renderShapesSVG([s],fg,bg));
-    }
+    }else{out.push(..._renderShapesSVG([s],fg,bg));}
   }
-  out.push(..._renderLabelsSVG(geo.labels,fg,mid));
-  return out.join('\n');
+  return[...out,..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
 }
 
-// =============================================================================
-// LED
-// =============================================================================
-// Circle, single input (i0) on left in 'right' orientation.
-// Sized to match 1-input NAND (radius=25). Supports all four orientations.
-// =============================================================================
-
-function ledGeometry(ox,oy,name,orientation) {
-  const radius=25,pinStub=18;
-  const totalW=radius*2+pinStub,totalH=radius*2;
+// LED — radius 25→20
+function ledGeometry(ox,oy,name,orientation){
+  const radius=20,totalW=radius*2+STUB,totalH=radius*2;
   const angles={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2};
-  const angle=angles[orientation]??0;
-  const cos=Math.cos(angle),sin=Math.sin(angle);
+  const angle=angles[orientation]??0,cos=Math.cos(angle),sin=Math.sin(angle);
   let pivotX,pivotY;
-  if (orientation==='right'||orientation==='left') {
-    pivotX=ox+totalW/2; pivotY=oy+totalH/2;
-  } else {
-    pivotX=ox+totalH/2; pivotY=oy+totalW/2;
-  }
+  if(orientation==='right'||orientation==='left'){pivotX=ox+totalW/2;pivotY=oy+totalH/2;}
+  else{pivotX=ox+totalH/2;pivotY=oy+totalW/2;}
   function l2c(lx,ly){return _l2c(pivotX,pivotY,totalW,totalH,cos,sin,lx,ly);}
-  const [ccx,ccy]=l2c(pinStub+radius,radius);
-  const [sx1,sy1]=l2c(0,radius),[sx2,sy2]=l2c(pinStub,radius);
-  const shapes=[
-    {type:'circle',cx:ccx,cy:ccy,r:radius,lineWidth:1.5},
-    {type:'line',x1:sx1,y1:sy1,x2:sx2,y2:sy2,lineWidth:1.5},
-  ];
+  const [ccx,ccy]=l2c(STUB+radius,radius);
+  const [sx1,sy1]=l2c(0,radius),[sx2,sy2]=l2c(STUB,radius);
+  const shapes=[{type:'circle',cx:ccx,cy:ccy,r:radius,lineWidth:1.5},{type:'line',x1:sx1,y1:sy1,x2:sx2,y2:sy2,lineWidth:1.5}];
   const labels=[{x:ccx,y:ccy,text:name,kind:'name',align:'center'}];
   const pins={i0:{x:sx1,y:sy1}};
-  return {totalW,totalH,shapes,labels,pins,angle};
+  return{totalW,totalH,shapes,labels,pins,angle};
 }
+function renderLedCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
+function renderLedSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-function renderLedCanvas(ctx,geo,fg,mid,bg) {
-  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
-  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
-}
-function renderLedSVG(geo,fg,mid,bg) {
-  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
-}
-
-// =============================================================================
-// SWITCH (swtch)
-// =============================================================================
-// Circle, single output (o0) on right in 'right' orientation.
-// Mirror of LED. Supports all four orientations.
-// =============================================================================
-
-function swtchGeometry(ox,oy,name,orientation) {
-  const radius=25,pinStub=18;
-  const totalW=radius*2+pinStub,totalH=radius*2;
+// SWITCH — radius 25→20
+function swtchGeometry(ox,oy,name,orientation){
+  const radius=20,totalW=radius*2+STUB,totalH=radius*2;
   const angles={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2};
-  const angle=angles[orientation]??0;
-  const cos=Math.cos(angle),sin=Math.sin(angle);
+  const angle=angles[orientation]??0,cos=Math.cos(angle),sin=Math.sin(angle);
   let pivotX,pivotY;
-  if (orientation==='right'||orientation==='left') {
-    pivotX=ox+totalW/2; pivotY=oy+totalH/2;
-  } else {
-    pivotX=ox+totalH/2; pivotY=oy+totalW/2;
-  }
+  if(orientation==='right'||orientation==='left'){pivotX=ox+totalW/2;pivotY=oy+totalH/2;}
+  else{pivotX=ox+totalH/2;pivotY=oy+totalW/2;}
   function l2c(lx,ly){return _l2c(pivotX,pivotY,totalW,totalH,cos,sin,lx,ly);}
   const [ccx,ccy]=l2c(radius,radius);
-  const [sx1,sy1]=l2c(radius*2,radius),[sx2,sy2]=l2c(radius*2+pinStub,radius);
-  const shapes=[
-    {type:'circle',cx:ccx,cy:ccy,r:radius,lineWidth:1.5},
-    {type:'line',x1:sx1,y1:sy1,x2:sx2,y2:sy2,lineWidth:1.5},
-  ];
+  const [sx1,sy1]=l2c(radius*2,radius),[sx2,sy2]=l2c(radius*2+STUB,radius);
+  const shapes=[{type:'circle',cx:ccx,cy:ccy,r:radius,lineWidth:1.5},{type:'line',x1:sx1,y1:sy1,x2:sx2,y2:sy2,lineWidth:1.5}];
   const labels=[{x:ccx,y:ccy,text:name,kind:'name',align:'center'}];
   const pins={o0:{x:sx2,y:sy2}};
-  return {totalW,totalH,shapes,labels,pins,angle};
+  return{totalW,totalH,shapes,labels,pins,angle};
 }
+function renderSwtchCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
+function renderSwtchSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-function renderSwtchCanvas(ctx,geo,fg,mid,bg) {
-  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
-  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
-}
-function renderSwtchSVG(geo,fg,mid,bg) {
-  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
-}
-
-// =============================================================================
-// GND
-// =============================================================================
-// Downward-pointing unfilled triangle. Fixed orientation.
-// o0 connection point at top center (stub top).
-// =============================================================================
-
-function gndGeometry(ox,oy,name) {
-  const w=30,h=20,stubLen=14,totalW=w,totalH=stubLen+h;
-  const cx=ox+totalW/2;
+// GND — w=40, no name label (singleton, identity is obvious from symbol)
+function gndGeometry(ox,oy,name){
+  const w=40,h=20,stubLen=20,totalW=w,totalH=stubLen+h,cx=ox+totalW/2;
   const shapes=[
     {type:'line',x1:cx,y1:oy,x2:cx,y2:oy+stubLen,lineWidth:1.5},
     {type:'polygon',points:[[ox,oy+stubLen],[ox+w,oy+stubLen],[cx,oy+stubLen+h]],lineWidth:1.5},
   ];
-  const labels=[{x:cx,y:oy+stubLen+h/2,text:name,kind:'name',align:'center'}];
+  const labels=[];
   const pins={o0:{x:cx,y:oy}};
-  return {totalW,totalH,shapes,labels,pins};
+  return{totalW,totalH,shapes,labels,pins};
 }
+function renderGndCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
+function renderGndSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-function renderGndCanvas(ctx,geo,fg,mid,bg) {
-  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
-  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
-}
-function renderGndSVG(geo,fg,mid,bg) {
-  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
-}
-
-// =============================================================================
-// VCC
-// =============================================================================
-// Upward-pointing unfilled triangle. Fixed orientation.
-// o0 connection point at bottom center (stub bottom).
-// =============================================================================
-
-function vccGeometry(ox,oy,name) {
-  const w=30,h=20,stubLen=14,totalW=w,totalH=stubLen+h;
-  const cx=ox+totalW/2;
+// VCC — w=40, no name label (singleton, identity is obvious from symbol)
+function vccGeometry(ox,oy,name){
+  const w=40,h=20,stubLen=20,totalW=w,totalH=stubLen+h,cx=ox+totalW/2;
   const shapes=[
     {type:'line',x1:cx,y1:oy+totalH,x2:cx,y2:oy+h,lineWidth:1.5},
     {type:'polygon',points:[[ox,oy+h],[ox+w,oy+h],[cx,oy]],lineWidth:1.5},
   ];
-  const labels=[{x:cx,y:oy+h/2,text:name,kind:'name',align:'center'}];
+  const labels=[];
   const pins={o0:{x:cx,y:oy+totalH}};
-  return {totalW,totalH,shapes,labels,pins};
+  return{totalW,totalH,shapes,labels,pins};
 }
+function renderVccCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
+function renderVccSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-function renderVccCanvas(ctx,geo,fg,mid,bg) {
-  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
-  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
-}
-function renderVccSVG(geo,fg,mid,bg) {
-  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
-}
-
-// =============================================================================
-// CLK
-// =============================================================================
-// Mirror orientation box (right or left).
-// R0 — left edge co-linear with Q0, active-low (bubble on input side)
-// q0 — right edge upper
-// Q0 — right edge lower, active-low (bubble on output side)
-// Name centered vertically between q0 and Q0.
-// =============================================================================
-
-function clkGeometry(ox,oy,name,orientation) {
-  const boxW=70,rowTop=20,rowBot=80,boxH=rowBot+rowTop;
-  const BUBBLE=5,STUB=18,PAD=10;
-  const q0Y=oy+rowTop,Q0Y=oy+rowBot,R0Y=Q0Y;
-
+// CLK — boxW=80, boxH=100, BUBBLE=10, STUB=20
+// q0 at oy+20, Q0 at oy+60, R0 at bottom centre (like dflipflop)
+function clkGeometry(ox,oy,name,orientation){
+  const boxW=80,rowTop=20,rowBot=60,boxH=100,PAD=10;
+  const q0Y=oy+rowTop,Q0Y=oy+rowBot;
+  const R0X=ox+boxW/2;
   const shapes=[
     {type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5},
     {type:'line',x1:ox+boxW,y1:q0Y,x2:ox+boxW+STUB,y2:q0Y,lineWidth:1.5},
     {type:'circle',cx:ox+boxW+BUBBLE,cy:Q0Y,r:BUBBLE,lineWidth:1.5},
     {type:'line',x1:ox+boxW+BUBBLE*2,y1:Q0Y,x2:ox+boxW+BUBBLE*2+STUB,y2:Q0Y,lineWidth:1.5},
-    {type:'line',x1:ox-BUBBLE*2-STUB,y1:R0Y,x2:ox-BUBBLE*2,y2:R0Y,lineWidth:1.5},
-    {type:'circle',cx:ox-BUBBLE,cy:R0Y,r:BUBBLE,lineWidth:1.5},
+    {type:'circle',cx:R0X,cy:oy+boxH+BUBBLE,r:BUBBLE,lineWidth:1.5},
+    {type:'line',x1:R0X,y1:oy+boxH+BUBBLE*2,x2:R0X,y2:oy+boxH+BUBBLE*2+STUB,lineWidth:1.5},
   ];
   const labels=[
-    {x:ox+boxW/2,y:oy+(rowTop+rowBot)/2,text:name,kind:'name',align:'center'},
+    {x:ox+boxW/2,y:oy+boxH/2,text:name,kind:'name',align:'center'},
     {x:ox+boxW-PAD,y:q0Y,text:'q',kind:'pin',align:'right'},
     {x:ox+boxW-PAD,y:Q0Y,text:'Q',kind:'pin',align:'right'},
-    {x:ox+PAD,y:R0Y,text:'R',kind:'pin',align:'left'},
+    {x:R0X,y:oy+boxH-PAD,text:'R',kind:'pin',align:'center'},
   ];
   const pins={
-    q0:{x:ox+boxW+STUB,y:q0Y},
+    q0:{x:ox+boxW+STUB,         y:q0Y},
     Q0:{x:ox+boxW+BUBBLE*2+STUB,y:Q0Y},
-    R0:{x:ox-BUBBLE*2-STUB,y:R0Y},
+    R0:{x:R0X,                  y:oy+boxH+BUBBLE*2+STUB},
   };
   const geo={boxW,boxH,shapes,labels,pins};
-  return orientation==='left' ? _mirrorBoxGeo(geo,ox+boxW/2) : geo;
+  return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
 }
+function renderClkCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
+function renderClkSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-function renderClkCanvas(ctx,geo,fg,mid,bg) {
-  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
-  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
-}
-function renderClkSVG(geo,fg,mid,bg) {
-  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
-}
-
-// =============================================================================
-// MEM
-// =============================================================================
-// Mirror orientation box (right or left). Size scales with numAddr and numData (min 4 pins).
-// a0..a(n-1) — top edge, evenly spaced
-// w0         — bottom edge, centered
-// i0..i(n-1) — left edge, evenly spaced  (data in)
-// o0..o(n-1) — right edge, evenly spaced (data out)
-// =============================================================================
-
-function memGeometry(ox,oy,name,numAddr,numData,orientation) {
+// MEM — dataSpacing=PIN_SPACE (exact), w0 pin at ox+PIN_SPACE
+function memGeometry(ox,oy,name,numAddr,numData,orientation){
   const MIN_PINS=4;
   const effData=Math.max(numData,MIN_PINS),effAddr=Math.max(numAddr,MIN_PINS);
   const boxH=(effData+1)*PIN_SPACE;
   const boxW=Math.max(100,(effAddr+1)*PIN_SPACE);
-  const STUB=18,PAD=10;
-
+  const PAD=10,addrSpacing=boxW/(effAddr+1);
   const shapes=[{type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5}];
   const labels=[{x:ox+boxW/2,y:oy+boxH/2,text:name,kind:'name',align:'center'}];
   const pins={};
-
-  const aSpacing=boxW/(numAddr+1);
-  for (let i=0;i<numAddr;i++) {
-    const px=ox+aSpacing*(i+1);
+  for(let i=0;i<numAddr;i++){
+    const px=ox+addrSpacing*(i+1);
     shapes.push({type:'line',x1:px,y1:oy-STUB,x2:px,y2:oy,lineWidth:1.5});
     labels.push({x:px,y:oy+PAD,text:`a${i}`,kind:'pin',align:'center'});
     pins[`a${i}`]={x:px,y:oy-STUB};
   }
-
-  const wx=ox+boxW/2;
-  shapes.push({type:'line',x1:wx,y1:oy+boxH,x2:wx,y2:oy+boxH+STUB,lineWidth:1.5});
-  labels.push({x:wx,y:oy+boxH-PAD,text:'w',kind:'pin',align:'center'});
-  pins['w0']={x:wx,y:oy+boxH+STUB};
-
-  const dSpacing=boxH/(numData+1);
-  for (let i=0;i<numData;i++) {
-    const py=oy+dSpacing*(i+1);
+  for(let i=0;i<numData;i++){
+    const py=oy+PIN_SPACE*(i+1);
     shapes.push({type:'line',x1:ox-STUB,y1:py,x2:ox,y2:py,lineWidth:1.5});
-    shapes.push({type:'line',x1:ox+boxW,y1:py,x2:ox+boxW+STUB,y2:py,lineWidth:1.5});
     labels.push({x:ox+PAD,y:py,text:`i${i}`,kind:'pin',align:'left'});
-    labels.push({x:ox+boxW-PAD,y:py,text:`o${i}`,kind:'pin',align:'right'});
     pins[`i${i}`]={x:ox-STUB,y:py};
+    shapes.push({type:'line',x1:ox+boxW,y1:py,x2:ox+boxW+STUB,y2:py,lineWidth:1.5});
+    labels.push({x:ox+boxW-PAD,y:py,text:`o${i}`,kind:'pin',align:'right'});
     pins[`o${i}`]={x:ox+boxW+STUB,y:py};
   }
-
+  const wX=ox+PIN_SPACE;
+  shapes.push({type:'line',x1:wX,y1:oy+boxH,x2:wX,y2:oy+boxH+STUB,lineWidth:1.5});
+  labels.push({x:wX,y:oy+boxH-PAD,text:'w',kind:'pin',align:'center'});
+  pins['w0']={x:wX,y:oy+boxH+STUB};
   const geo={boxW,boxH,shapes,labels,pins};
-  return orientation==='left' ? _mirrorBoxGeo(geo,ox+boxW/2) : geo;
+  return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
 }
+function renderMemCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
+function renderMemSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-function renderMemCanvas(ctx,geo,fg,mid,bg) {
-  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
-  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
-}
-function renderMemSVG(geo,fg,mid,bg) {
-  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
-}
-
-// =============================================================================
-// SRLATCH
-// =============================================================================
-// Mirror orientation box (right or left).
-// S0 — left upper, active-low (bubble)
-// R0 — left lower, active-low (bubble)
-// q0 — right upper, plain
-// Q0 — right lower, active-low (bubble)
-// =============================================================================
-
-function srlatchGeometry(ox,oy,name,orientation) {
-  const boxW=70,boxH=80,BUBBLE=5,STUB=18,PAD=10;
-  const S0Y=oy+boxH*0.3,R0Y=oy+boxH*0.7;
-  const q0Y=oy+boxH*0.3,Q0Y=oy+boxH*0.7;
-
+// SRLATCH — boxW 70→80, pins at oy+20/oy+60
+function srlatchGeometry(ox,oy,name,orientation){
+  const boxW=80,boxH=80,PAD=10;
+  const S0Y=oy+20,R0Y=oy+60,q0Y=oy+20,Q0Y=oy+60;
   const shapes=[
     {type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5},
     {type:'line',x1:ox-BUBBLE*2-STUB,y1:S0Y,x2:ox-BUBBLE*2,y2:S0Y,lineWidth:1.5},
@@ -543,41 +373,20 @@ function srlatchGeometry(ox,oy,name,orientation) {
     {x:ox+boxW-PAD,y:Q0Y,text:'Q',kind:'pin',align:'right'},
   ];
   const pins={
-    S0:{x:ox-BUBBLE*2-STUB,y:S0Y},
-    R0:{x:ox-BUBBLE*2-STUB,y:R0Y},
-    q0:{x:ox+boxW+STUB,y:q0Y},
-    Q0:{x:ox+boxW+BUBBLE*2+STUB,y:Q0Y},
+    S0:{x:ox-BUBBLE*2-STUB,y:S0Y},R0:{x:ox-BUBBLE*2-STUB,y:R0Y},
+    q0:{x:ox+boxW+STUB,y:q0Y},Q0:{x:ox+boxW+BUBBLE*2+STUB,y:Q0Y},
   };
   const geo={boxW,boxH,shapes,labels,pins};
-  return orientation==='left' ? _mirrorBoxGeo(geo,ox+boxW/2) : geo;
+  return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
 }
+function renderSrlatchCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
+function renderSrlatchSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-function renderSrlatchCanvas(ctx,geo,fg,mid,bg) {
-  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
-  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
-}
-function renderSrlatchSVG(geo,fg,mid,bg) {
-  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
-}
-
-// =============================================================================
-// DFLIPFLOP
-// =============================================================================
-// Mirror orientation box (right or left).
-// S0 — top edge centered, active-low (bubble on top)
-// R0 — bottom edge centered, active-low (bubble on bottom)
-// d0 — left edge upper, plain
-// c0 — left edge lower, edge-triggered clock (triangle symbol, no label)
-// q0 — right edge upper, plain  (co-linear with d0)
-// Q0 — right edge lower, active-low (bubble)  (co-linear with c0)
-// =============================================================================
-
-function dflipflopGeometry(ox,oy,name,orientation) {
-  const boxW=70,boxH=100,BUBBLE=5,STUB=18,PAD=10,TRI=7;
-  const d0Y=oy+boxH*0.3,c0Y=oy+boxH*0.7;
-  const q0Y=d0Y,Q0Y=c0Y;
+// DFLIPFLOP — boxW 70→80, d0=oy+20, c0=oy+80, S0X=R0X=ox+40
+function dflipflopGeometry(ox,oy,name,orientation){
+  const boxW=80,boxH=100,PAD=10,TRI=7;
+  const d0Y=oy+20,c0Y=oy+80,q0Y=d0Y,Q0Y=c0Y;
   const S0X=ox+boxW/2,R0X=ox+boxW/2;
-
   const shapes=[
     {type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5},
     {type:'line',x1:S0X,y1:oy-BUBBLE*2-STUB,x2:S0X,y2:oy-BUBBLE*2,lineWidth:1.5},
@@ -600,42 +409,21 @@ function dflipflopGeometry(ox,oy,name,orientation) {
     {x:ox+boxW-PAD,y:Q0Y,text:'Q',kind:'pin',align:'right'},
   ];
   const pins={
-    S0:{x:S0X,y:oy-BUBBLE*2-STUB},
-    R0:{x:R0X,y:oy+boxH+BUBBLE*2+STUB},
-    d0:{x:ox-STUB,y:d0Y},
-    c0:{x:ox-STUB,y:c0Y},
-    q0:{x:ox+boxW+STUB,y:q0Y},
-    Q0:{x:ox+boxW+BUBBLE*2+STUB,y:Q0Y},
+    S0:{x:S0X,y:oy-BUBBLE*2-STUB},R0:{x:R0X,y:oy+boxH+BUBBLE*2+STUB},
+    d0:{x:ox-STUB,y:d0Y},c0:{x:ox-STUB,y:c0Y},
+    q0:{x:ox+boxW+STUB,y:q0Y},Q0:{x:ox+boxW+BUBBLE*2+STUB,y:Q0Y},
   };
   const geo={boxW,boxH,shapes,labels,pins};
-  return orientation==='left' ? _mirrorBoxGeo(geo,ox+boxW/2) : geo;
+  return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
 }
+function renderDflipflopCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
+function renderDflipflopSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-function renderDflipflopCanvas(ctx,geo,fg,mid,bg) {
-  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
-  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
-}
-function renderDflipflopSVG(geo,fg,mid,bg) {
-  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
-}
-
-// =============================================================================
-// REG
-// =============================================================================
-// Mirror orientation box (right or left). numBits determines pin count and height.
-// c0 — top edge centered, edge-triggered clock (downward triangle, no label)
-// R0 — bottom edge centered, active-low (bubble)
-// d0..d(n-1) — left edge, evenly spaced
-// q0..q(n-1) — right edge, evenly spaced (co-linear with d pins)
-// Note: Q outputs omitted by design decision (higher-level abstraction).
-// =============================================================================
-
-function regGeometry(ox,oy,name,numBits,orientation) {
-  const boxW=70,TRI=7,BUBBLE=5,STUB=18,PAD=10;
-  const boxH=Math.max(80,(numBits+1)*PIN_SPACE);
-  const pinSpacing=boxH/(numBits+1);
+// REG — boxW 70→80, pinSpacing=PIN_SPACE
+function regGeometry(ox,oy,name,numBits,orientation){
+  const boxW=80,TRI=7,PAD=10;
+  const boxH=Math.max(numBits+1,4)*PIN_SPACE;
   const cX=ox+boxW/2,rX=ox+boxW/2;
-
   const shapes=[
     {type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5},
     {type:'line',x1:cX,y1:oy-STUB,x2:cX,y2:oy,lineWidth:1.5},
@@ -647,12 +435,9 @@ function regGeometry(ox,oy,name,numBits,orientation) {
     {x:ox+boxW/2,y:oy+boxH/2,text:name,kind:'name',align:'center'},
     {x:rX,y:oy+boxH-PAD,text:'R',kind:'pin',align:'center'},
   ];
-  const pins={
-    c0:{x:cX,y:oy-STUB},
-    R0:{x:rX,y:oy+boxH+BUBBLE*2+STUB},
-  };
-  for (let i=0;i<numBits;i++) {
-    const py=oy+pinSpacing*(i+1);
+  const pins={c0:{x:cX,y:oy-STUB},R0:{x:rX,y:oy+boxH+BUBBLE*2+STUB}};
+  for(let i=0;i<numBits;i++){
+    const py=oy+PIN_SPACE*(i+1);
     shapes.push({type:'line',x1:ox-STUB,y1:py,x2:ox,y2:py,lineWidth:1.5});
     shapes.push({type:'line',x1:ox+boxW,y1:py,x2:ox+boxW+STUB,y2:py,lineWidth:1.5});
     labels.push({x:ox+PAD,y:py,text:`d${i}`,kind:'pin',align:'left'});
@@ -661,35 +446,20 @@ function regGeometry(ox,oy,name,numBits,orientation) {
     pins[`q${i}`]={x:ox+boxW+STUB,y:py};
   }
   const geo={boxW,boxH,shapes,labels,pins};
-  return orientation==='left' ? _mirrorBoxGeo(geo,ox+boxW/2) : geo;
+  return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
 }
+function renderRegCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
+function renderRegSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-function renderRegCanvas(ctx,geo,fg,mid,bg) {
-  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
-  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
-}
-function renderRegSVG(geo,fg,mid,bg) {
-  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
-}
-
-// =============================================================================
-// PANEL
-// =============================================================================
-// Mirror orientation box (right or left). numBits determines pin count and height.
-// i0..i(n-1) — left edge, evenly spaced  (LED inputs)
-// o0..o(n-1) — right edge, evenly spaced (switch outputs)
-// No clock, no reset.
-// =============================================================================
-
-function panelGeometry(ox,oy,name,numBits,orientation) {
-  const boxW=70,STUB=18,PAD=10;
-  const boxH=Math.max(80,(numBits+1)*PIN_SPACE);
-  const pinSpacing=boxH/(numBits+1);
+// PANEL — boxW 70→80, pinSpacing=PIN_SPACE
+function panelGeometry(ox,oy,name,numBits,orientation){
+  const boxW=80,PAD=10;
+  const boxH=Math.max(numBits+1,4)*PIN_SPACE;
   const shapes=[{type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5}];
   const labels=[{x:ox+boxW/2,y:oy+boxH/2,text:name,kind:'name',align:'center'}];
   const pins={};
-  for (let i=0;i<numBits;i++) {
-    const py=oy+pinSpacing*(i+1);
+  for(let i=0;i<numBits;i++){
+    const py=oy+PIN_SPACE*(i+1);
     shapes.push({type:'line',x1:ox-STUB,y1:py,x2:ox,y2:py,lineWidth:1.5});
     shapes.push({type:'line',x1:ox+boxW,y1:py,x2:ox+boxW+STUB,y2:py,lineWidth:1.5});
     labels.push({x:ox+PAD,y:py,text:`i${i}`,kind:'pin',align:'left'});
@@ -698,256 +468,680 @@ function panelGeometry(ox,oy,name,numBits,orientation) {
     pins[`o${i}`]={x:ox+boxW+STUB,y:py};
   }
   const geo={boxW,boxH,shapes,labels,pins};
-  return orientation==='left' ? _mirrorBoxGeo(geo,ox+boxW/2) : geo;
+  return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
 }
+function renderPanelCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
+function renderPanelSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-function renderPanelCanvas(ctx,geo,fg,mid,bg) {
-  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
-  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
-}
-function renderPanelSVG(geo,fg,mid,bg) {
-  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
-}
-
-// =============================================================================
-// ADDWORD (and ADDBIT as numBits=1)
-// =============================================================================
-// Mirror orientation box (right or left). numBits determines pin count and size.
-// a0..a(n-1) — top edge, evenly spaced
-// b0..b(n-1) — left edge, evenly spaced
-// o0..o(n-1) — right edge, evenly spaced (co-linear with b pins, sum outputs)
-// i0         — bottom edge left quarter (carry in)
-// o0_carry   — bottom edge right quarter (carry out) — pin key 'o0_carry'
-//
-// addbit is identical with numBits=1. Both device types call this same function.
-// Carry chain flows bottom-to-bottom when cascading adders left-to-right.
-// =============================================================================
-
-function addwordGeometry(ox,oy,name,numBits,orientation) {
-  const STUB=18,PAD=10;
-  const boxH=Math.max(60,(numBits+1)*PIN_SPACE);
-  const boxW=Math.max(70,(numBits+1)*PIN_SPACE);
-  const bSpacing=boxH/(numBits+1);
-  const aSpacing=boxW/(numBits+1);
-
+// ADDWORD — all spacings exact PIN_SPACE multiples
+// iX=ox+PIN_SPACE, coX=ox+boxW-PIN_SPACE
+function addwordGeometry(ox,oy,name,numBits,orientation){
+  const PAD=10;
+  const boxH=Math.max(numBits+1,3)*PIN_SPACE;
+  const boxW=Math.max(numBits+1,4)*PIN_SPACE;
   const shapes=[{type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5}];
   const labels=[{x:ox+boxW/2,y:oy+boxH/2,text:name,kind:'name',align:'center'}];
   const pins={};
-
-  for (let i=0;i<numBits;i++) {
-    const px=ox+aSpacing*(i+1);
+  for(let i=0;i<numBits;i++){
+    const px=ox+PIN_SPACE*(i+1);
     shapes.push({type:'line',x1:px,y1:oy-STUB,x2:px,y2:oy,lineWidth:1.5});
     labels.push({x:px,y:oy+PAD,text:`a${i}`,kind:'pin',align:'center'});
     pins[`a${i}`]={x:px,y:oy-STUB};
   }
-  for (let i=0;i<numBits;i++) {
-    const py=oy+bSpacing*(i+1);
+  for(let i=0;i<numBits;i++){
+    const py=oy+PIN_SPACE*(i+1);
     shapes.push({type:'line',x1:ox-STUB,y1:py,x2:ox,y2:py,lineWidth:1.5});
     labels.push({x:ox+PAD,y:py,text:`b${i}`,kind:'pin',align:'left'});
     pins[`b${i}`]={x:ox-STUB,y:py};
   }
-  for (let i=0;i<numBits;i++) {
-    const py=oy+bSpacing*(i+1);
+  for(let i=0;i<numBits;i++){
+    const py=oy+PIN_SPACE*(i+1);
     shapes.push({type:'line',x1:ox+boxW,y1:py,x2:ox+boxW+STUB,y2:py,lineWidth:1.5});
-    labels.push({x:ox+boxW-PAD,y:py,text:`o${i}`,kind:'pin',align:'right'});
-    pins[`o${i}`]={x:ox+boxW+STUB,y:py};
+    labels.push({x:ox+boxW-PAD,y:py,text:`s${i}`,kind:'pin',align:'right'});
+    pins[`s${i}`]={x:ox+boxW+STUB,y:py};
   }
-
-  const iX=ox+boxW*0.25;
+  const iX=ox+PIN_SPACE;
   shapes.push({type:'line',x1:iX,y1:oy+boxH,x2:iX,y2:oy+boxH+STUB,lineWidth:1.5});
-  labels.push({x:iX,y:oy+boxH-PAD,text:'i',kind:'pin',align:'center'});
+  labels.push({x:iX,y:oy+boxH-PAD,text:'ci',kind:'pin',align:'center'});
   pins['i0']={x:iX,y:oy+boxH+STUB};
-
-  const cX=ox+boxW*0.75;
+  const cX=ox+boxW-PIN_SPACE;
   shapes.push({type:'line',x1:cX,y1:oy+boxH,x2:cX,y2:oy+boxH+STUB,lineWidth:1.5});
-  labels.push({x:cX,y:oy+boxH-PAD,text:'c',kind:'pin',align:'center'});
-  pins['o0_carry']={x:cX,y:oy+boxH+STUB};
-
+  labels.push({x:cX,y:oy+boxH-PAD,text:'co',kind:'pin',align:'center'});
+  pins['o0']={x:cX,y:oy+boxH+STUB};
   const geo={boxW,boxH,shapes,labels,pins};
-  return orientation==='left' ? _mirrorBoxGeo(geo,ox+boxW/2) : geo;
+  return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
 }
+function renderAddwordCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
+function renderAddwordSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
+const addbitGeometry=(ox,oy,name,orientation)=>addwordGeometry(ox,oy,name,1,orientation);
+const renderAddbitCanvas=renderAddwordCanvas;
+const renderAddbitSVG=renderAddwordSVG;
 
-function renderAddwordCanvas(ctx,geo,fg,mid,bg) {
-  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
-  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
-}
-function renderAddwordSVG(geo,fg,mid,bg) {
-  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
-}
-
-// addbit is an alias — same geometry, same renderers
-const addbitGeometry    = (ox,oy,name,orientation) => addwordGeometry(ox,oy,name,1,orientation);
-const renderAddbitCanvas = renderAddwordCanvas;
-const renderAddbitSVG    = renderAddwordSVG;
-
-// =============================================================================
-// NETSOURCE (named net source)
-// =============================================================================
-// Right-pointing arrowhead (unfilled triangle) with net name label beside the
-// tip. Single input pin i0 on the stub side (left in 'right' orientation).
-// Supports all four orientations.
-//
-// 'right' layout (local coords):
-//        ___
-//   i0--\   \
-//        >   netname
-//   pin  /___/
-//   stub  arrow
-// =============================================================================
-
-function netsourceGeometry(ox,oy,name,orientation) {
-  const STUB=18,arrowW=24,arrowH=20;
-  const totalW=STUB+arrowW,totalH=arrowH;
+// NETSOURCE — shaft (stub) leading to a solid arrowhead triangle.
+// In right orientation: i0 pin at left, arrow points right.
+// arrowH=40 (totalH=40, pin at y=20 on grid), arrowW=20.
+function netsourceGeometry(ox,oy,name,orientation){
+  const arrowW=20,arrowH=40,totalW=STUB+arrowW,totalH=arrowH;
   const angles={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2};
-  const angle=angles[orientation]??0;
-  const cos=Math.cos(angle),sin=Math.sin(angle);
+  const angle=angles[orientation]??0,cos=Math.cos(angle),sin=Math.sin(angle);
   let pivotX,pivotY;
-  if (orientation==='right'||orientation==='left') {
-    pivotX=ox+totalW/2; pivotY=oy+totalH/2;
-  } else {
-    pivotX=ox+totalH/2; pivotY=oy+totalW/2;
-  }
+  if(orientation==='right'||orientation==='left'){pivotX=ox+totalW/2;pivotY=oy+totalH/2;}
+  else{pivotX=ox+totalH/2;pivotY=oy+totalW/2;}
   function l2c(lx,ly){return _l2c(pivotX,pivotY,totalW,totalH,cos,sin,lx,ly);}
-
-  // Input pin and stub
+  // shaft: pin → base of arrowhead
   const [px,py]=l2c(0,arrowH/2);
-  const [sx,sy]=l2c(STUB,arrowH/2);
-  // Arrowhead triangle
-  const [t1x,t1y]=l2c(STUB,0);
-  const [t2x,t2y]=l2c(STUB+arrowW,arrowH/2);
-  const [t3x,t3y]=l2c(STUB,arrowH);
-  // Name label — placed beyond the arrow tip
-  const [nx,ny]=l2c(STUB+arrowW+6,arrowH/2);
-
+  const [sx2,sy2]=l2c(STUB,arrowH/2);
+  // arrowhead triangle: back-top, tip, back-bottom
+  const [v1x,v1y]=l2c(STUB,0);
+  const [v2x,v2y]=l2c(STUB+arrowW,arrowH/2);
+  const [v3x,v3y]=l2c(STUB,arrowH);
+  // name label just past the tip
+  const [nx,ny]=l2c(STUB+arrowW+4,arrowH/2);
   const shapes=[
-    {type:'line',x1:px,y1:py,x2:sx,y2:sy,lineWidth:1.5},
-    {type:'polygon',points:[[t1x,t1y],[t2x,t2y],[t3x,t3y]],lineWidth:1.5},
+    {type:'line',x1:px,y1:py,x2:sx2,y2:sy2,lineWidth:1.5},
+    {type:'polygon',points:[[v1x,v1y],[v2x,v2y],[v3x,v3y]],lineWidth:1.5},
   ];
-
   let nameAlign;
-  if (orientation==='right') nameAlign='left';
-  else if (orientation==='left') nameAlign='right';
-  else nameAlign='center';
-
+  if(orientation==='right')nameAlign='left';else if(orientation==='left')nameAlign='right';else nameAlign='center';
   const labels=[{x:nx,y:ny,text:name,kind:'name',align:nameAlign}];
   const pins={i0:{x:px,y:py}};
-  return {totalW,totalH,shapes,labels,pins,angle};
+  return{totalW,totalH,shapes,labels,pins,angle};
 }
+function renderNetsourceCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
+function renderNetsourceSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-function renderNetsourceCanvas(ctx,geo,fg,mid,bg) {
-  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
-  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
-}
-function renderNetsourceSVG(geo,fg,mid,bg) {
-  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
-}
-
-// =============================================================================
-// NETSINK (named net sink)
-// =============================================================================
-// Chevron (V-shape) with point toward the output pin. Single output pin o0 on
-// the stub side (right in 'right' orientation). Net name label on the open side.
-// Supports all four orientations.
-//
-// 'right' layout (local coords):
-//             \
-//              \
-//   netname     >--o0
-//              /   pin
-//             /    stub
-//          chevron
-// =============================================================================
-
-function netsinkGeometry(ox,oy,name,orientation) {
-  const STUB=18,chevW=24,chevH=20;
-  const totalW=chevW+STUB,totalH=chevH;
+// NETSINK — chevH 20→40, chevW 16→20
+function netsinkGeometry(ox,oy,name,orientation){
+  const chevW=20,chevH=40,totalW=chevW+STUB,totalH=chevH;
   const angles={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2};
-  const angle=angles[orientation]??0;
-  const cos=Math.cos(angle),sin=Math.sin(angle);
+  const angle=angles[orientation]??0,cos=Math.cos(angle),sin=Math.sin(angle);
   let pivotX,pivotY;
-  if (orientation==='right'||orientation==='left') {
-    pivotX=ox+totalW/2; pivotY=oy+totalH/2;
-  } else {
-    pivotX=ox+totalH/2; pivotY=oy+totalW/2;
-  }
+  if(orientation==='right'||orientation==='left'){pivotX=ox+totalW/2;pivotY=oy+totalH/2;}
+  else{pivotX=ox+totalH/2;pivotY=oy+totalW/2;}
   function l2c(lx,ly){return _l2c(pivotX,pivotY,totalW,totalH,cos,sin,lx,ly);}
-
-  // Chevron arms
-  const [v1x,v1y]=l2c(0,0);
-  const [v2x,v2y]=l2c(chevW,chevH/2);
-  const [v3x,v3y]=l2c(0,chevH);
-  // Output pin
-  const [px,py]=l2c(chevW+STUB,chevH/2);
-  // Name label — placed on the open side of the chevron
-  const [nx,ny]=l2c(-6,chevH/2);
-
+  const [v1x,v1y]=l2c(0,0),[v2x,v2y]=l2c(chevW,chevH/2),[v3x,v3y]=l2c(0,chevH);
+  const [px,py]=l2c(chevW+STUB,chevH/2),[nx,ny]=l2c(-6,chevH/2);
   const shapes=[
     {type:'line',x1:v1x,y1:v1y,x2:v2x,y2:v2y,lineWidth:1.5},
     {type:'line',x1:v3x,y1:v3y,x2:v2x,y2:v2y,lineWidth:1.5},
     {type:'line',x1:v2x,y1:v2y,x2:px,y2:py,lineWidth:1.5},
   ];
-
   let nameAlign;
-  if (orientation==='right') nameAlign='right';
-  else if (orientation==='left') nameAlign='left';
-  else nameAlign='center';
-
+  if(orientation==='right')nameAlign='right';else if(orientation==='left')nameAlign='left';else nameAlign='center';
   const labels=[{x:nx,y:ny,text:name,kind:'name',align:nameAlign}];
   const pins={o0:{x:px,y:py}};
-  return {totalW,totalH,shapes,labels,pins,angle};
+  return{totalW,totalH,shapes,labels,pins,angle};
 }
-
-function renderNetsinkCanvas(ctx,geo,fg,mid,bg) {
-  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
-  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
-}
-function renderNetsinkSVG(geo,fg,mid,bg) {
-  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
-}
+function renderNetsinkCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
+function renderNetsinkSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
 // =============================================================================
-// DEVICE TYPE DISPATCH TABLE
+// DISPATCH TABLES
 // =============================================================================
-// Maps .lsim device type strings to their geometry functions.
-// Used by the parser/placer to instantiate symbols without a switch statement.
-// 'probe' is intentionally absent — it is silently ignored during parsing.
+const SYMBOL_FACTORIES={
+  nand:      (ox,oy,name,params,orient)=>nandGeometry(ox,oy,name,orient,params.numInputs),
+  led:       (ox,oy,name,params,orient)=>ledGeometry(ox,oy,name,orient),
+  swtch:     (ox,oy,name,params,orient)=>swtchGeometry(ox,oy,name,orient),
+  gnd:       (ox,oy,name)              =>gndGeometry(ox,oy,name),
+  vcc:       (ox,oy,name)              =>vccGeometry(ox,oy,name),
+  clk:       (ox,oy,name,params,orient)=>clkGeometry(ox,oy,name,orient),
+  mem:       (ox,oy,name,params,orient)=>memGeometry(ox,oy,name,params.numAddr,params.numData,orient),
+  srlatch:   (ox,oy,name,params,orient)=>srlatchGeometry(ox,oy,name,orient),
+  dflipflop: (ox,oy,name,params,orient)=>dflipflopGeometry(ox,oy,name,orient),
+  reg:       (ox,oy,name,params,orient)=>regGeometry(ox,oy,name,params.numBits,orient),
+  panel:     (ox,oy,name,params,orient)=>panelGeometry(ox,oy,name,params.numBits,orient),
+  addbit:    (ox,oy,name,params,orient)=>addbitGeometry(ox,oy,name,orient),
+  addword:   (ox,oy,name,params,orient)=>addwordGeometry(ox,oy,name,params.numBits,orient),
+  netsource: (ox,oy,name,params,orient)=>netsourceGeometry(ox,oy,name,orient),
+  netsink:   (ox,oy,name,params,orient)=>netsinkGeometry(ox,oy,name,orient),
+};
+const CANVAS_RENDERERS={
+  nand:renderNandCanvas,led:renderLedCanvas,swtch:renderSwtchCanvas,
+  gnd:renderGndCanvas,vcc:renderVccCanvas,clk:renderClkCanvas,
+  mem:renderMemCanvas,srlatch:renderSrlatchCanvas,dflipflop:renderDflipflopCanvas,
+  reg:renderRegCanvas,panel:renderPanelCanvas,
+  addbit:renderAddbitCanvas,addword:renderAddwordCanvas,
+  netsource:renderNetsourceCanvas,netsink:renderNetsinkCanvas,
+};
+const SVG_RENDERERS={
+  nand:renderNandSVG,led:renderLedSVG,swtch:renderSwtchSVG,
+  gnd:renderGndSVG,vcc:renderVccSVG,clk:renderClkSVG,
+  mem:renderMemSVG,srlatch:renderSrlatchSVG,dflipflop:renderDflipflopSVG,
+  reg:renderRegSVG,panel:renderPanelSVG,
+  addbit:renderAddbitSVG,addword:renderAddwordSVG,
+  netsource:renderNetsourceSVG,netsink:renderNetsinkSVG,
+};
+
+// =============================================================================
+// APPLICATION
 // =============================================================================
 
-const SYMBOL_FACTORIES = {
-  nand:       (ox,oy,name,params,orient) => nandGeometry(ox,oy,name,orient,params.numInputs),
-  led:        (ox,oy,name,params,orient) => ledGeometry(ox,oy,name,orient),
-  swtch:      (ox,oy,name,params,orient) => swtchGeometry(ox,oy,name,orient),
-  gnd:        (ox,oy,name)               => gndGeometry(ox,oy,name),
-  vcc:        (ox,oy,name)               => vccGeometry(ox,oy,name),
-  clk:        (ox,oy,name,params,orient) => clkGeometry(ox,oy,name,orient),
-  mem:        (ox,oy,name,params,orient) => memGeometry(ox,oy,name,params.numAddr,params.numData,orient),
-  srlatch:    (ox,oy,name,params,orient) => srlatchGeometry(ox,oy,name,orient),
-  dflipflop:  (ox,oy,name,params,orient) => dflipflopGeometry(ox,oy,name,orient),
-  reg:        (ox,oy,name,params,orient) => regGeometry(ox,oy,name,params.numBits,orient),
-  panel:      (ox,oy,name,params,orient) => panelGeometry(ox,oy,name,params.numBits,orient),
-  addbit:     (ox,oy,name,params,orient) => addbitGeometry(ox,oy,name,orient),
-  addword:    (ox,oy,name,params,orient) => addwordGeometry(ox,oy,name,params.numBits,orient),
-  netsource:  (ox,oy,name,params,orient) => netsourceGeometry(ox,oy,name,orient),
-  netsink:    (ox,oy,name,params,orient) => netsinkGeometry(ox,oy,name,orient),
+const DEVICE_DEFS={
+  nand:     {label:'NAND',        defaultParams:{numInputs:2},orientations:['right','left','up','down'],
+             paramSpecs:[{key:'numInputs',label:'Inputs',min:1,max:16}]},
+  led:      {label:'LED',         defaultParams:{},orientations:['right','left','up','down'],paramSpecs:[]},
+  swtch:    {label:'Switch',      defaultParams:{},orientations:['right','left','up','down'],paramSpecs:[]},
+  gnd:      {label:'GND',         defaultParams:{},orientations:null,paramSpecs:[]},
+  vcc:      {label:'VCC',         defaultParams:{},orientations:null,paramSpecs:[]},
+  clk:      {label:'Clock',       defaultParams:{},orientations:['right','left'],paramSpecs:[]},
+  mem:      {label:'Memory',      defaultParams:{numAddr:2,numData:2},orientations:['right','left'],
+             paramSpecs:[{key:'numAddr',label:'Addr bits',min:1,max:16},{key:'numData',label:'Data bits',min:1,max:16}]},
+  srlatch:  {label:'SR Latch',    defaultParams:{},orientations:['right','left'],paramSpecs:[]},
+  dflipflop:{label:'D Flip-Flop', defaultParams:{},orientations:['right','left'],paramSpecs:[]},
+  reg:      {label:'Register',    defaultParams:{numBits:4},orientations:['right','left'],
+             paramSpecs:[{key:'numBits',label:'Bits',min:1,max:16}]},
+  panel:    {label:'Panel',       defaultParams:{numBits:4},orientations:['right','left'],
+             paramSpecs:[{key:'numBits',label:'Bits',min:1,max:16}]},
+  addbit:   {label:'1-bit Adder', defaultParams:{},orientations:['right','left'],paramSpecs:[]},
+  addword:  {label:'N-bit Adder', defaultParams:{numBits:4},orientations:['right','left'],
+             paramSpecs:[{key:'numBits',label:'Bits',min:1,max:16}]},
+  netsource:{label:'Net Source',  defaultParams:{},orientations:['right','left','up','down'],paramSpecs:[]},
+  netsink:  {label:'Net Sink',    defaultParams:{},orientations:['right','left','up','down'],paramSpecs:[]},
+};
+const DEVICE_TYPE_ORDER=Object.keys(DEVICE_DEFS);
+
+// --- State ---
+const state={
+  mode:'idle',
+  devices:[],
+  panX:0,panY:0,
+  nameCounters:{},
+  selectionParams:{},
+  selectionLayout:null,
+  selScrollY:0,
+  placing:null,
+  panAnchor:null,
+  fileHandle:null,
 };
 
-const CANVAS_RENDERERS = {
-  nand: renderNandCanvas, led: renderLedCanvas, swtch: renderSwtchCanvas,
-  gnd: renderGndCanvas, vcc: renderVccCanvas, clk: renderClkCanvas,
-  mem: renderMemCanvas, srlatch: renderSrlatchCanvas, dflipflop: renderDflipflopCanvas,
-  reg: renderRegCanvas, panel: renderPanelCanvas,
-  addbit: renderAddbitCanvas, addword: renderAddwordCanvas,
-  netsource: renderNetsourceCanvas, netsink: renderNetsinkCanvas,
-};
+// --- DOM refs ---
+const canvas   =document.getElementById('canvas');
+const ctx      =canvas.getContext('2d');
 
-const SVG_RENDERERS = {
-  nand: renderNandSVG, led: renderLedSVG, swtch: renderSwtchSVG,
-  gnd: renderGndSVG, vcc: renderVccSVG, clk: renderClkSVG,
-  mem: renderMemSVG, srlatch: renderSrlatchSVG, dflipflop: renderDflipflopSVG,
-  reg: renderRegSVG, panel: renderPanelSVG,
-  addbit: renderAddbitSVG, addword: renderAddwordSVG,
-  netsource: renderNetsourceSVG, netsink: renderNetsinkSVG,
-};
+const paramPopup=document.getElementById('paramPopup');
+const ctxMenu  =document.getElementById('ctxMenu');
+const logPanel =document.getElementById('logPanel');
+
+// --- Log panel (replaces console.log for user-visible messages) ---
+function logMsg(msg){
+  const line=document.createElement('div');
+  line.textContent=msg;
+  logPanel.appendChild(line);
+  // Keep at most 50 lines
+  while(logPanel.children.length>50)logPanel.removeChild(logPanel.firstChild);
+  logPanel.scrollTop=logPanel.scrollHeight;
+}
+
+// --- Utilities ---
+function snapToGrid(v){return Math.round(v/PIN_SPACE)*PIN_SPACE;}
+function screenToCanvas(sx,sy){
+  const r=canvas.getBoundingClientRect();
+  return{x:sx-r.left-canvas.width/2-state.panX, y:sy-r.top-canvas.height/2-state.panY};
+}
+
+// --- Geometry helpers ---
+function makeGeo(type,ox,oy,name,params,orientation){
+  const f=SYMBOL_FACTORIES[type];return f?f(ox,oy,name,params,orientation):null;
+}
+function computeDeviceBounds(geo){
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  function e(x,y){if(x<minX)minX=x;if(y<minY)minY=y;if(x>maxX)maxX=x;if(y>maxY)maxY=y;}
+  for(const p of Object.values(geo.pins))e(p.x,p.y);
+  for(const s of geo.shapes){
+    if(s.type==='rect'){e(s.x,s.y);e(s.x+s.w,s.y+s.h);}
+    else if(s.type==='circle'){e(s.cx-s.r,s.cy-s.r);e(s.cx+s.r,s.cy+s.r);}
+    else if(s.type==='line'){e(s.x1,s.y1);e(s.x2,s.y2);}
+    else if(s.type==='polygon'){for(const p of s.points)e(p[0],p[1]);}
+    else if(s.type==='clockTriangle'){e(s.x-s.size*1.5,s.y-s.size);e(s.x+s.size*1.5,s.y+s.size*1.5);}
+    else if(s.type==='nandBody'){
+      e(s.topLeft[0],s.topLeft[1]);e(s.botLeft[0],s.botLeft[1]);
+      e(s.botArcStart[0],s.botArcStart[1]);e(s.topArcEnd[0],s.topArcEnd[1]);
+    }
+  }
+  return{minX,minY,maxX,maxY};
+}
+function computeBoundsWithBuffer(geo){
+  const vb=computeDeviceBounds(geo);
+  const BUF=2*PIN_SPACE,tol=2;
+  let hL=false,hR=false,hT=false,hB=false;
+  for(const p of Object.values(geo.pins)){
+    if(Math.abs(p.x-vb.minX)<tol)hL=true;
+    if(Math.abs(p.x-vb.maxX)<tol)hR=true;
+    if(Math.abs(p.y-vb.minY)<tol)hT=true;
+    if(Math.abs(p.y-vb.maxY)<tol)hB=true;
+  }
+  return{minX:vb.minX-(hL?BUF:0),minY:vb.minY-(hT?BUF:0),maxX:vb.maxX+(hR?BUF:0),maxY:vb.maxY+(hB?BUF:0)};
+}
+function boxesOverlap(a,b){return a.minX<b.maxX&&a.maxX>b.minX&&a.minY<b.maxY&&a.maxY>b.minY;}
+function checkInterference(geo,exclude){
+  const nb=computeBoundsWithBuffer(geo);
+  for(const d of state.devices){
+    if(d===exclude)continue;
+    if(boxesOverlap(nb,computeBoundsWithBuffer(d.geo)))return d;
+  }
+  return null;
+}
+
+// --- Auto-naming ---
+function generateName(type){
+  if(!state.nameCounters[type])state.nameCounters[type]=0;
+  state.nameCounters[type]++;
+  return type+state.nameCounters[type];
+}
+function recalcNameCounters(){
+  state.nameCounters={};
+  for(const d of state.devices){
+    const m=d.name.match(/^([a-zA-Z]+)(\d+)$/);
+    if(m){const k=m[1].toLowerCase(),n=parseInt(m[2]);state.nameCounters[k]=Math.max(state.nameCounters[k]||0,n);}
+  }
+}
+
+// --- Selection config ---
+function getSelCfg(type){
+  const def=DEVICE_DEFS[type],s=state.selectionParams[type];
+  return{
+    params:s?{...def.defaultParams,...s.params}:{...def.defaultParams},
+    orientation:s?.orientation||(def.orientations?def.orientations[0]:'right'),
+  };
+}
+function setSelCfg(type,params,orientation){
+  state.selectionParams[type]={params:{...params},orientation};
+  state.selectionLayout=null;
+}
+
+// --- Canvas sizing ---
+function resizeCanvas(){
+  canvas.width=window.innerWidth;
+  canvas.height=window.innerHeight-logPanel.offsetHeight;
+  state.selectionLayout=null;
+  render();
+}
+
+// --- Rendering ---
+function render(){
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(state.mode==='selection')renderSelectionView();
+  else renderNormalView();
+}
+function renderNormalView(){
+  const ox=canvas.width/2+state.panX,oy=canvas.height/2+state.panY;
+  ctx.setTransform(1,0,0,1,ox,oy);
+  renderGrid(ox,oy);
+  for(const d of state.devices){const r=CANVAS_RENDERERS[d.type];if(r)r(ctx,d.geo,SYM_FG,SYM_MID,SYM_BG);}
+  if(state.placing&&state.placing.geo){
+    ctx.save();ctx.globalAlpha=0.5;
+    const r=CANVAS_RENDERERS[state.placing.type];
+    if(r)r(ctx,state.placing.geo,SYM_FG,SYM_MID,SYM_BG);
+    ctx.restore();
+  }
+}
+function renderGrid(ox,oy){
+  const L=-ox,T=-oy,R=canvas.width-ox,B=canvas.height-oy,maj=PIN_SPACE*5;
+  ctx.fillStyle='rgba(0,0,0,0.07)';
+  const gx0=Math.ceil(L/PIN_SPACE)*PIN_SPACE,gy0=Math.ceil(T/PIN_SPACE)*PIN_SPACE;
+  for(let gx=gx0;gx<=R;gx+=PIN_SPACE)
+    for(let gy=gy0;gy<=B;gy+=PIN_SPACE)
+      ctx.fillRect(gx-0.5,gy-0.5,1,1);
+  ctx.strokeStyle='rgba(0,0,0,0.06)';ctx.lineWidth=0.5;
+  const mx0=Math.ceil(L/maj)*maj,my0=Math.ceil(T/maj)*maj;
+  for(let gx=mx0;gx<=R;gx+=maj){ctx.beginPath();ctx.moveTo(gx,T);ctx.lineTo(gx,B);ctx.stroke();}
+  for(let gy=my0;gy<=B;gy+=maj){ctx.beginPath();ctx.moveTo(L,gy);ctx.lineTo(R,gy);ctx.stroke();}
+  ctx.strokeStyle='rgba(0,0,0,0.18)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(-12,0);ctx.lineTo(12,0);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(0,-12);ctx.lineTo(0,12);ctx.stroke();
+}
+
+// --- Selection view ---
+function computeSelectionLayout(){
+  if(state.selectionLayout)return state.selectionLayout;
+  const PAD=30,LABEL_H=22,GAP=12,HDR=44;
+  const items=[];
+  for(const type of DEVICE_TYPE_ORDER){
+    const cfg=getSelCfg(type),geo=makeGeo(type,0,0,type,cfg.params,cfg.orientation);
+    const b=computeDeviceBounds(geo);
+    items.push({type,geo,bounds:b,w:b.maxX-b.minX,h:b.maxY-b.minY});
+  }
+  const maxW=Math.max(...items.map(i=>i.w)),maxH=Math.max(...items.map(i=>i.h));
+  const cellW=Math.max(120,maxW+PAD*2),cellH=Math.max(100,maxH+PAD*2)+LABEL_H;
+  const cols=Math.max(1,Math.floor((canvas.width-GAP)/(cellW+GAP)));
+  const gridW=cols*(cellW+GAP)-GAP,sx=(canvas.width-gridW)/2;
+  for(let i=0;i<items.length;i++){
+    const col=i%cols,row=Math.floor(i/cols),it=items[i];
+    it.cellX=sx+col*(cellW+GAP);it.cellY=HDR+row*(cellH+GAP);
+    it.cellW=cellW;it.cellH=cellH;
+    it.drawOffX=it.cellX+(cellW-it.w)/2-it.bounds.minX;
+    it.drawOffY=it.cellY+(cellH-LABEL_H-it.h)/2-it.bounds.minY;
+  }
+  const rows=Math.ceil(items.length/cols);
+  const totalGridH=HDR+rows*(cellH+GAP)+GAP;
+  state.selectionLayout={items,cellW,cellH,LABEL_H,HDR,totalGridH};
+  return state.selectionLayout;
+}
+function renderSelectionView(){
+  const layout=computeSelectionLayout();
+  const HDR=layout.HDR;
+  const maxScroll=Math.max(0,layout.totalGridH-canvas.height+HDR);
+  state.selScrollY=Math.max(0,Math.min(state.selScrollY,maxScroll));
+  const scroll=state.selScrollY;
+
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle='#e0ded7';ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // Clip scrollable content area below header
+  ctx.save();
+  ctx.beginPath();ctx.rect(0,HDR,canvas.width,canvas.height-HDR);ctx.clip();
+  ctx.translate(0,-scroll);
+
+  const hasClk=state.devices.some(d=>d.type==='clk');
+  const hasVcc=state.devices.some(d=>d.type==='vcc');
+  const hasGnd=state.devices.some(d=>d.type==='gnd');
+  for(const it of layout.items){
+    const grey=(it.type==='clk'&&hasClk)||(it.type==='vcc'&&hasVcc)||(it.type==='gnd'&&hasGnd);
+    ctx.fillStyle=grey?'#ccc':'#f5f4ef';ctx.strokeStyle='#aaa';ctx.lineWidth=1;
+    ctx.fillRect(it.cellX,it.cellY,it.cellW,it.cellH);ctx.strokeRect(it.cellX,it.cellY,it.cellW,it.cellH);
+    ctx.save();ctx.translate(it.drawOffX,it.drawOffY);
+    if(grey)ctx.globalAlpha=0.35;
+    const r=CANVAS_RENDERERS[it.type];if(r)r(ctx,it.geo,SYM_FG,SYM_MID,SYM_BG);
+    ctx.restore();
+    ctx.fillStyle=grey?'#999':'#333';ctx.font='12px sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(DEVICE_DEFS[it.type].label,it.cellX+it.cellW/2,it.cellY+it.cellH-layout.LABEL_H/2+2);
+  }
+  ctx.restore();  // end clip
+
+  // Pinned header (drawn after clip restore so it's always on top)
+  ctx.fillStyle='#d4d2cb';ctx.fillRect(0,0,canvas.width,HDR);
+  ctx.fillStyle='#333';ctx.font='bold 14px sans-serif';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('Select device — Left-click: grab   Right-click: configure   Scroll to see more',canvas.width/2,HDR/2);
+
+  // Scroll indicators
+  if(scroll>0){
+    ctx.fillStyle='rgba(0,0,0,0.15)';ctx.fillRect(0,HDR,canvas.width,6);
+  }
+  if(scroll<maxScroll){
+    ctx.fillStyle='rgba(0,0,0,0.15)';ctx.fillRect(0,canvas.height-6,canvas.width,6);
+  }
+}
+function hitTestSelection(sx,sy){
+  const layout=computeSelectionLayout();
+  const r=canvas.getBoundingClientRect(),x=sx-r.left,y=sy-r.top+state.selScrollY;
+  for(const it of layout.items)if(x>=it.cellX&&x<=it.cellX+it.cellW&&y>=it.cellY&&y<=it.cellY+it.cellH)return it;
+  return null;
+}
+function hitTestDevice(cx,cy){
+  for(let i=state.devices.length-1;i>=0;i--){
+    const b=computeDeviceBounds(state.devices[i].geo);
+    if(cx>=b.minX&&cx<=b.maxX&&cy>=b.minY&&cy<=b.maxY)return state.devices[i];
+  }
+  return null;
+}
+
+// --- Placement ---
+function startPlacing(type,sx,sy){
+  if(type==='clk'&&state.devices.some(d=>d.type==='clk')){
+    logMsg('Error: only one clock device allowed');return;
+  }
+  if(type==='vcc'&&state.devices.some(d=>d.type==='vcc')){
+    logMsg('Error: only one VCC device allowed');return;
+  }
+  if(type==='gnd'&&state.devices.some(d=>d.type==='gnd')){
+    logMsg('Error: only one GND device allowed');return;
+  }
+  const cfg=getSelCfg(type),name=generateName(type);
+  const ref=makeGeo(type,0,0,name,cfg.params,cfg.orientation);
+  const rb=computeDeviceBounds(ref);
+  state.placing={type,params:cfg.params,orientation:cfg.orientation,name,
+    cOx:(rb.minX+rb.maxX)/2,cOy:(rb.minY+rb.maxY)/2,geo:null,ox:0,oy:0};
+  state.mode='placing';
+  updatePlacing(sx,sy);render();
+}
+function updatePlacing(sx,sy){
+  const p=state.placing;if(!p)return;
+  const c=screenToCanvas(sx,sy);
+  p.ox=snapToGrid(c.x-p.cOx);p.oy=snapToGrid(c.y-p.cOy);
+  p.geo=makeGeo(p.type,p.ox,p.oy,p.name,p.params,p.orientation);
+}
+function finishPlacing(){
+  const p=state.placing;if(!p||!p.geo)return;
+  const hit=checkInterference(p.geo,null);
+  if(hit){
+    logMsg(`Interference: "${p.name}" overlaps "${hit.name}". Not placed.`);
+    state.nameCounters[p.type]=Math.max(0,(state.nameCounters[p.type]||1)-1);
+  }else{
+    state.devices.push({type:p.type,name:p.name,params:{...p.params},
+      position:{x:p.ox,y:p.oy},orientation:p.orientation,geo:p.geo});
+    logMsg(`Placed ${p.type} "${p.name}" at (${p.ox}, ${p.oy})`);
+  }
+  state.placing=null;state.mode='idle';render();
+}
+
+// --- Panning ---
+function startPanning(sx,sy){
+  state.panAnchor={sx,sy,px:state.panX,py:state.panY};
+  state.mode='panning';canvas.style.cursor='grabbing';
+}
+function updatePanning(sx,sy){
+  const a=state.panAnchor;if(!a)return;
+  state.panX=a.px+(sx-a.sx);state.panY=a.py+(sy-a.sy);render();
+}
+function finishPanning(){
+  state.panAnchor=null;state.mode='idle';canvas.style.cursor='default';
+}
+
+// --- File I/O ---
+function serializeState(){
+  return JSON.stringify({version:1,
+    devices:state.devices.map(d=>({type:d.type,name:d.name,params:d.params,
+      x:d.position.x,y:d.position.y,orientation:d.orientation})),
+    wires:[]},null,2);
+}
+function deserializeState(json){
+  let data;
+  try{data=JSON.parse(json);}catch(e){logMsg('Error: invalid JSON');return false;}
+  if(!data.version||!Array.isArray(data.devices)){logMsg('Error: invalid .ldraw format');return false;}
+  state.devices=[];
+  for(const d of data.devices){
+    if(!SYMBOL_FACTORIES[d.type]){logMsg(`Warning: unknown type "${d.type}", skipped`);continue;}
+    const params=d.params||{},orient=d.orientation||'right';
+    const geo=makeGeo(d.type,d.x,d.y,d.name,params,orient);
+    state.devices.push({type:d.type,name:d.name,params,position:{x:d.x,y:d.y},orientation:orient,geo});
+  }
+  recalcNameCounters();return true;
+}
+async function saveLdraw(){
+  try{
+    const json=serializeState();
+    if(state.fileHandle){
+      const w=await state.fileHandle.createWritable();await w.write(json);await w.close();
+      logMsg(`Saved ${state.fileHandle.name}`);
+    }else{
+      const h=await window.showSaveFilePicker({
+        suggestedName:'circuit.ldraw',
+        types:[{description:'ldraw files',accept:{'application/json':['.ldraw']}}],
+      });
+      const w=await h.createWritable();await w.write(json);await w.close();
+      state.fileHandle=h;logMsg(`Saved ${h.name}`);
+    }
+  }catch(e){if(e.name!=='AbortError')logMsg('Save error: '+e.message);}
+}
+async function loadLdraw(){
+  try{
+    const [h]=await window.showOpenFilePicker({
+      types:[{description:'ldraw files',accept:{'application/json':['.ldraw']}}],
+    });
+    const f=await h.getFile(),t=await f.text();
+    if(deserializeState(t)){
+      state.fileHandle=h;state.mode='idle';
+      logMsg(`Loaded ${h.name} — ${state.devices.length} device(s)`);
+      render();
+    }
+  }catch(e){if(e.name!=='AbortError')logMsg('Load error: '+e.message);}
+}
+function handleFileDrop(file){
+  if(!file.name.endsWith('.ldraw')){logMsg('Error: not a .ldraw file');return;}
+  const r=new FileReader();
+  r.onload=()=>{
+    if(deserializeState(r.result)){
+      state.fileHandle=null;state.mode='idle';
+      logMsg(`Loaded ${file.name} (dropped) — ${state.devices.length} device(s)`);
+      render();
+    }
+  };
+  r.readAsText(file);
+}
+
+// --- Parameter editor ---
+let ppType=null;
+function showParamEditor(type,sx,sy){
+  const def=DEVICE_DEFS[type];
+  if(!def.orientations&&def.paramSpecs.length===0)return;
+  ppType=type;
+  const cfg=getSelCfg(type);
+  let h=`<h3>${def.label}</h3>`;
+  if(def.orientations){
+    h+=`<div class="pp-row"><label>Orientation</label><select id="pp-orient">`;
+    for(const o of def.orientations)h+=`<option value="${o}"${o===cfg.orientation?' selected':''}>${o}</option>`;
+    h+=`</select></div>`;
+  }
+  for(const sp of def.paramSpecs){
+    const v=cfg.params[sp.key]??def.defaultParams[sp.key];
+    h+=`<div class="pp-row"><label>${sp.label}</label>
+      <input type="number" id="pp-${sp.key}" value="${v}" min="${sp.min}" max="${sp.max}"></div>`;
+  }
+  paramPopup.innerHTML=h;paramPopup.style.display='block';
+  let px=sx+10,py=sy-10;const pw=180;
+  if(px+pw>window.innerWidth)px=sx-pw-10;
+  if(py<0)py=10;
+  paramPopup.style.left=px+'px';paramPopup.style.top=py+'px';
+  const osel=document.getElementById('pp-orient');
+  if(osel)osel.addEventListener('change',applyPP);
+  for(const sp of def.paramSpecs){
+    const inp=document.getElementById(`pp-${sp.key}`);
+    if(inp){inp.addEventListener('change',applyPP);inp.addEventListener('input',applyPP);}
+  }
+}
+function applyPP(){
+  if(!ppType)return;
+  const def=DEVICE_DEFS[ppType];
+  const osel=document.getElementById('pp-orient');
+  const orient=osel?osel.value:'right';
+  const params={...def.defaultParams};
+  for(const sp of def.paramSpecs){
+    const inp=document.getElementById(`pp-${sp.key}`);
+    if(inp){let v=parseInt(inp.value);if(isNaN(v))v=def.defaultParams[sp.key];params[sp.key]=Math.max(sp.min,Math.min(sp.max,v));}
+  }
+  setSelCfg(ppType,params,orient);render();
+}
+function hidePP(){paramPopup.style.display='none';ppType=null;}
+
+// --- Context menu ---
+function showCtxMenu(sx,sy){
+  ctxMenu.style.left=sx+'px';ctxMenu.style.top=sy+'px';
+  ctxMenu.style.display='block';
+}
+function hideCtxMenu(){ctxMenu.style.display='none';}
+
+function enterSelectionMode(){
+  state.mode='selection';state.selectionLayout=null;state.selScrollY=0;hidePP();render();
+}
+
+document.getElementById('ctx-add').addEventListener('click',()=>{
+  hideCtxMenu();enterSelectionMode();
+});
+document.getElementById('ctx-pan').addEventListener('click',()=>{
+  hideCtxMenu();
+  const xs=prompt('Pan to X:','0');if(xs===null)return;
+  const ys=prompt('Pan to Y:','0');if(ys===null)return;
+  const x=parseInt(xs),y=parseInt(ys);
+  if(isNaN(x)||isNaN(y)){logMsg('Error: invalid coordinates');return;}
+  // panX/panY are offsets so canvas origin appears at canvas centre + pan.
+  // To put canvas point (x,y) at screen centre: panX=-x, panY=-y.
+  state.panX=-x;state.panY=-y;render();
+  
+});
+document.getElementById('ctx-load').addEventListener('click',()=>{hideCtxMenu();loadLdraw();});
+document.getElementById('ctx-save').addEventListener('click',()=>{hideCtxMenu();saveLdraw();});
+document.getElementById('ctx-redraw').addEventListener('click',()=>{hideCtxMenu();render();});
+
+// --- Events ---
+canvas.addEventListener('mousedown',e=>{
+  if(paramPopup.style.display!=='none'&&!paramPopup.contains(e.target))hidePP();
+  if(ctxMenu.style.display!=='none')hideCtxMenu();
+
+  if(e.button===0){
+    if(state.mode==='selection'){
+      const it=hitTestSelection(e.clientX,e.clientY);
+      if(it)startPlacing(it.type,e.clientX,e.clientY);
+    }else if(state.mode==='idle'){
+      startPanning(e.clientX,e.clientY);
+    }
+  }
+});
+
+canvas.addEventListener('mousemove',e=>{
+  if(state.mode==='placing'){updatePlacing(e.clientX,e.clientY);render();}
+  else if(state.mode==='panning')updatePanning(e.clientX,e.clientY);
+});
+
+canvas.addEventListener('mouseup',e=>{
+  if(e.button===0){
+    if(state.mode==='placing')finishPlacing();
+    else if(state.mode==='panning')finishPanning();
+  }
+});
+
+canvas.addEventListener('contextmenu',e=>{
+  e.preventDefault();
+  if(state.mode==='selection'){
+    const it=hitTestSelection(e.clientX,e.clientY);
+    if(it){showParamEditor(it.type,e.clientX,e.clientY);return;}
+    // Right-click on background of selection view → exit
+    state.mode='idle';render();return;
+  }
+  // Normal / idle mode: show canvas context menu
+  if(state.mode==='idle'){
+    showCtxMenu(e.clientX,e.clientY);
+  }
+});
+
+document.addEventListener('mousedown',e=>{
+  if(paramPopup.style.display!=='none'&&!paramPopup.contains(e.target)&&e.target!==canvas)hidePP();
+  if(ctxMenu.style.display!=='none'&&!ctxMenu.contains(e.target))hideCtxMenu();
+});
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    if(ctxMenu.style.display!=='none'){hideCtxMenu();return;}
+    if(paramPopup.style.display!=='none'){hidePP();return;}
+    if(state.mode==='selection'){state.mode='idle';hidePP();render();}
+    else if(state.mode==='placing'){
+      if(state.placing)state.nameCounters[state.placing.type]=Math.max(0,(state.nameCounters[state.placing.type]||1)-1);
+      state.placing=null;state.mode='idle';render();
+    }
+  }
+});
+
+canvas.addEventListener('wheel',e=>{
+  if(state.mode==='selection'){
+    e.preventDefault();
+    state.selScrollY+=e.deltaY;
+    render();
+  }
+},{passive:false});
+
+canvas.addEventListener('dragover',e=>e.preventDefault());
+canvas.addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer.files.length)handleFileDrop(e.dataTransfer.files[0]);});
+window.addEventListener('resize',resizeCanvas);
+
+// --- Init ---
+(function init(){
+  resizeCanvas();
+  const p=new URLSearchParams(window.location.search);
+  const hint=p.get('ldraw');
+  if(hint)logMsg(`Hint: load "${hint}" via right-click → Load.`);
+})();
 
 </script>
 </body>

@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "devices": [
+    {
+      "type": "swtch",
+      "name": "sa",
+      "params": {},
+      "x": -80,
+      "y": -180,
+      "orientation": "right"
+    },
+    {
+      "type": "srlatch",
+      "name": "srlatch1",
+      "params": {},
+      "x": 0,
+      "y": -100,
+      "orientation": "right"
+    },
+    {
+      "type": "nand",
+      "name": "nand1",
+      "params": {
+        "numInputs": 1
+      },
+      "x": -200,
+      "y": -20,
+      "orientation": "right"
+    }
+  ],
+  "wires": []
+}
