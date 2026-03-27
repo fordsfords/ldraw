@@ -42,7 +42,7 @@ html, body { width:100%; height:100%; overflow:hidden; background:#e8e6df; font-
   <div class="ctx-item" id="ctx-pan">Pan to x, y…</div>
   <div class="ctx-sep"></div>
   <div class="ctx-item" id="ctx-load">Load…</div>
-  <div class="ctx-item" id="ctx-save">Save</div>
+  <div class="ctx-item" id="ctx-save">Save…</div>
   <div class="ctx-sep"></div>
   <div class="ctx-item" id="ctx-redraw">Redraw</div>
 </div>
@@ -65,9 +65,12 @@ let SYM_MID = '#5f5e5a';
 let SYM_BG  = '#f1efe8';
 function symSetColors(fg,mid,bg){SYM_FG=fg;SYM_MID=mid;SYM_BG=bg;}
 
-const PIN_SPACE = 20;
-const STUB   = PIN_SPACE;       // 20
-const BUBBLE = PIN_SPACE / 2;  // 10
+const PIN_SPACE  = 10;               // fine grid pitch (snap unit)
+const PIN_PITCH  = PIN_SPACE * 2;   // device pin-to-pin spacing (2 grid ticks)
+const STUB       = PIN_PITCH;       // regular pin stub length = 20
+const BUBBLE     = PIN_SPACE / 2;  // active-low bubble radius  = 5
+const BUBBLE_STUB = STUB - 2*BUBBLE; // line portion before bubble = 10
+// Active-low total reach = BUBBLE_STUB + 2*BUBBLE = STUB (same as regular pins)
 
 // --- Shared helpers ---
 function _l2c(pvX,pvY,tW,tH,cos,sin,lx,ly){
@@ -150,7 +153,7 @@ function _mirrorBoxGeo(geo,axisX){
 // For odd numInputs>=3 the output is 10px off grid — accepted limitation.
 // =============================================================================
 function nandGeometry(ox,oy,name,orientation,numInputs){
-  const PITCH=PIN_SPACE;
+  const PITCH=PIN_PITCH;  // 20px between input rows
   const rows=Math.max(numInputs,2);
   const bodyH=rows*PITCH;
   const arcR=bodyH/2,arcCx=bodyH*0.4,arcCy=bodyH/2;
@@ -159,7 +162,9 @@ function nandGeometry(ox,oy,name,orientation,numInputs){
   const outBase=bubbleCx+BUBBLE;
   const totalW=Math.ceil(outBase/PIN_SPACE)*PIN_SPACE+PIN_SPACE;
   const totalH=bodyH;
-  const pinStart=PIN_SPACE/2;
+  // For 1 input: place pin at bodyH/2 so it's co-linear with output arc centre.
+  // For 2+ inputs: start half a pitch from top so inputs straddle the centre.
+  const pinStart = numInputs===1 ? bodyH/2 : PIN_PITCH/2;
   const angles={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2};
   const angle=angles[orientation]??0;
   const cos=Math.cos(angle),sin=Math.sin(angle);
@@ -219,9 +224,9 @@ function renderNandSVG(geo,fg,mid,bg){
   return[...out,..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
 }
 
-// LED — radius 25→20
+// LED — radius=PIN_PITCH (20px)
 function ledGeometry(ox,oy,name,orientation){
-  const radius=20,totalW=radius*2+STUB,totalH=radius*2;
+  const radius=PIN_PITCH,totalW=radius*2+STUB,totalH=radius*2;
   const angles={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2};
   const angle=angles[orientation]??0,cos=Math.cos(angle),sin=Math.sin(angle);
   let pivotX,pivotY;
@@ -238,9 +243,9 @@ function ledGeometry(ox,oy,name,orientation){
 function renderLedCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
 function renderLedSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-// SWITCH — radius 25→20
+// SWITCH — radius=PIN_PITCH (20px)
 function swtchGeometry(ox,oy,name,orientation){
-  const radius=20,totalW=radius*2+STUB,totalH=radius*2;
+  const radius=PIN_PITCH,totalW=radius*2+STUB,totalH=radius*2;
   const angles={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2};
   const angle=angles[orientation]??0,cos=Math.cos(angle),sin=Math.sin(angle);
   let pivotX,pivotY;
@@ -257,9 +262,9 @@ function swtchGeometry(ox,oy,name,orientation){
 function renderSwtchCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
 function renderSwtchSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-// GND — w=40, no name label (singleton, identity is obvious from symbol)
+// GND — w=2*PIN_PITCH, no name label
 function gndGeometry(ox,oy,name){
-  const w=40,h=20,stubLen=20,totalW=w,totalH=stubLen+h,cx=ox+totalW/2;
+  const w=2*PIN_PITCH,h=PIN_PITCH,stubLen=PIN_PITCH,totalW=w,totalH=stubLen+h,cx=ox+totalW/2;
   const shapes=[
     {type:'line',x1:cx,y1:oy,x2:cx,y2:oy+stubLen,lineWidth:1.5},
     {type:'polygon',points:[[ox,oy+stubLen],[ox+w,oy+stubLen],[cx,oy+stubLen+h]],lineWidth:1.5},
@@ -271,9 +276,9 @@ function gndGeometry(ox,oy,name){
 function renderGndCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
 function renderGndSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-// VCC — w=40, no name label (singleton, identity is obvious from symbol)
+// VCC — w=2*PIN_PITCH, no name label
 function vccGeometry(ox,oy,name){
-  const w=40,h=20,stubLen=20,totalW=w,totalH=stubLen+h,cx=ox+totalW/2;
+  const w=2*PIN_PITCH,h=PIN_PITCH,stubLen=PIN_PITCH,totalW=w,totalH=stubLen+h,cx=ox+totalW/2;
   const shapes=[
     {type:'line',x1:cx,y1:oy+totalH,x2:cx,y2:oy+h,lineWidth:1.5},
     {type:'polygon',points:[[ox,oy+h],[ox+w,oy+h],[cx,oy]],lineWidth:1.5},
@@ -285,19 +290,19 @@ function vccGeometry(ox,oy,name){
 function renderVccCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
 function renderVccSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-// CLK — boxW=80, boxH=100, BUBBLE=10, STUB=20
-// q0 at oy+20, Q0 at oy+60, R0 at bottom centre (like dflipflop)
+// CLK — boxW=4*PIN_PITCH, boxH=5*PIN_PITCH; q0 at oy+PIN_PITCH, Q0 at oy+3*PIN_PITCH
+// R0 at bottom centre. BUBBLE/BUBBLE_STUB make q0 and Q0 extend equally from box.
 function clkGeometry(ox,oy,name,orientation){
-  const boxW=80,rowTop=20,rowBot=60,boxH=100,PAD=10;
-  const q0Y=oy+rowTop,Q0Y=oy+rowBot;
+  const boxW=4*PIN_PITCH,boxH=5*PIN_PITCH,PAD=10;
+  const q0Y=oy+PIN_PITCH,Q0Y=oy+3*PIN_PITCH;
   const R0X=ox+boxW/2;
   const shapes=[
     {type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5},
     {type:'line',x1:ox+boxW,y1:q0Y,x2:ox+boxW+STUB,y2:q0Y,lineWidth:1.5},
     {type:'circle',cx:ox+boxW+BUBBLE,cy:Q0Y,r:BUBBLE,lineWidth:1.5},
-    {type:'line',x1:ox+boxW+BUBBLE*2,y1:Q0Y,x2:ox+boxW+BUBBLE*2+STUB,y2:Q0Y,lineWidth:1.5},
+    {type:'line',x1:ox+boxW+BUBBLE*2,y1:Q0Y,x2:ox+boxW+BUBBLE*2+BUBBLE_STUB,y2:Q0Y,lineWidth:1.5},
     {type:'circle',cx:R0X,cy:oy+boxH+BUBBLE,r:BUBBLE,lineWidth:1.5},
-    {type:'line',x1:R0X,y1:oy+boxH+BUBBLE*2,x2:R0X,y2:oy+boxH+BUBBLE*2+STUB,lineWidth:1.5},
+    {type:'line',x1:R0X,y1:oy+boxH+BUBBLE*2,x2:R0X,y2:oy+boxH+BUBBLE*2+BUBBLE_STUB,lineWidth:1.5},
   ];
   const labels=[
     {x:ox+boxW/2,y:oy+boxH/2,text:name,kind:'name',align:'center'},
@@ -306,9 +311,9 @@ function clkGeometry(ox,oy,name,orientation){
     {x:R0X,y:oy+boxH-PAD,text:'R',kind:'pin',align:'center'},
   ];
   const pins={
-    q0:{x:ox+boxW+STUB,         y:q0Y},
-    Q0:{x:ox+boxW+BUBBLE*2+STUB,y:Q0Y},
-    R0:{x:R0X,                  y:oy+boxH+BUBBLE*2+STUB},
+    q0:{x:ox+boxW+STUB,              y:q0Y},
+    Q0:{x:ox+boxW+BUBBLE*2+BUBBLE_STUB,y:Q0Y},
+    R0:{x:R0X,                       y:oy+boxH+BUBBLE*2+BUBBLE_STUB},
   };
   const geo={boxW,boxH,shapes,labels,pins};
   return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
@@ -320,8 +325,8 @@ function renderClkSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg
 function memGeometry(ox,oy,name,numAddr,numData,orientation){
   const MIN_PINS=4;
   const effData=Math.max(numData,MIN_PINS),effAddr=Math.max(numAddr,MIN_PINS);
-  const boxH=(effData+1)*PIN_SPACE;
-  const boxW=Math.max(100,(effAddr+1)*PIN_SPACE);
+  const boxH=(effData+1)*PIN_PITCH;
+  const boxW=Math.max(5*PIN_PITCH,(effAddr+1)*PIN_PITCH);
   const PAD=10,addrSpacing=boxW/(effAddr+1);
   const shapes=[{type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5}];
   const labels=[{x:ox+boxW/2,y:oy+boxH/2,text:name,kind:'name',align:'center'}];
@@ -333,7 +338,7 @@ function memGeometry(ox,oy,name,numAddr,numData,orientation){
     pins[`a${i}`]={x:px,y:oy-STUB};
   }
   for(let i=0;i<numData;i++){
-    const py=oy+PIN_SPACE*(i+1);
+    const py=oy+PIN_PITCH*(i+1);
     shapes.push({type:'line',x1:ox-STUB,y1:py,x2:ox,y2:py,lineWidth:1.5});
     labels.push({x:ox+PAD,y:py,text:`i${i}`,kind:'pin',align:'left'});
     pins[`i${i}`]={x:ox-STUB,y:py};
@@ -341,7 +346,7 @@ function memGeometry(ox,oy,name,numAddr,numData,orientation){
     labels.push({x:ox+boxW-PAD,y:py,text:`o${i}`,kind:'pin',align:'right'});
     pins[`o${i}`]={x:ox+boxW+STUB,y:py};
   }
-  const wX=ox+PIN_SPACE;
+  const wX=ox+PIN_PITCH;
   shapes.push({type:'line',x1:wX,y1:oy+boxH,x2:wX,y2:oy+boxH+STUB,lineWidth:1.5});
   labels.push({x:wX,y:oy+boxH-PAD,text:'w',kind:'pin',align:'center'});
   pins['w0']={x:wX,y:oy+boxH+STUB};
@@ -351,19 +356,19 @@ function memGeometry(ox,oy,name,numAddr,numData,orientation){
 function renderMemCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
 function renderMemSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-// SRLATCH — boxW 70→80, pins at oy+20/oy+60
+// SRLATCH — boxW=4*PIN_PITCH, boxH=4*PIN_PITCH; S0/q0 at oy+PIN_PITCH, R0/Q0 at oy+3*PIN_PITCH
 function srlatchGeometry(ox,oy,name,orientation){
-  const boxW=80,boxH=80,PAD=10;
-  const S0Y=oy+20,R0Y=oy+60,q0Y=oy+20,Q0Y=oy+60;
+  const boxW=4*PIN_PITCH,boxH=4*PIN_PITCH,PAD=10;
+  const S0Y=oy+PIN_PITCH,R0Y=oy+3*PIN_PITCH,q0Y=oy+PIN_PITCH,Q0Y=oy+3*PIN_PITCH;
   const shapes=[
     {type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5},
-    {type:'line',x1:ox-BUBBLE*2-STUB,y1:S0Y,x2:ox-BUBBLE*2,y2:S0Y,lineWidth:1.5},
+    {type:'line',x1:ox-BUBBLE*2-BUBBLE_STUB,y1:S0Y,x2:ox-BUBBLE*2,y2:S0Y,lineWidth:1.5},
     {type:'circle',cx:ox-BUBBLE,cy:S0Y,r:BUBBLE,lineWidth:1.5},
-    {type:'line',x1:ox-BUBBLE*2-STUB,y1:R0Y,x2:ox-BUBBLE*2,y2:R0Y,lineWidth:1.5},
+    {type:'line',x1:ox-BUBBLE*2-BUBBLE_STUB,y1:R0Y,x2:ox-BUBBLE*2,y2:R0Y,lineWidth:1.5},
     {type:'circle',cx:ox-BUBBLE,cy:R0Y,r:BUBBLE,lineWidth:1.5},
     {type:'line',x1:ox+boxW,y1:q0Y,x2:ox+boxW+STUB,y2:q0Y,lineWidth:1.5},
     {type:'circle',cx:ox+boxW+BUBBLE,cy:Q0Y,r:BUBBLE,lineWidth:1.5},
-    {type:'line',x1:ox+boxW+BUBBLE*2,y1:Q0Y,x2:ox+boxW+BUBBLE*2+STUB,y2:Q0Y,lineWidth:1.5},
+    {type:'line',x1:ox+boxW+BUBBLE*2,y1:Q0Y,x2:ox+boxW+BUBBLE*2+BUBBLE_STUB,y2:Q0Y,lineWidth:1.5},
   ];
   const labels=[
     {x:ox+boxW/2,y:oy+boxH/2,text:name,kind:'name',align:'center'},
@@ -373,8 +378,8 @@ function srlatchGeometry(ox,oy,name,orientation){
     {x:ox+boxW-PAD,y:Q0Y,text:'Q',kind:'pin',align:'right'},
   ];
   const pins={
-    S0:{x:ox-BUBBLE*2-STUB,y:S0Y},R0:{x:ox-BUBBLE*2-STUB,y:R0Y},
-    q0:{x:ox+boxW+STUB,y:q0Y},Q0:{x:ox+boxW+BUBBLE*2+STUB,y:Q0Y},
+    S0:{x:ox-BUBBLE*2-BUBBLE_STUB,y:S0Y},R0:{x:ox-BUBBLE*2-BUBBLE_STUB,y:R0Y},
+    q0:{x:ox+boxW+STUB,y:q0Y},Q0:{x:ox+boxW+BUBBLE*2+BUBBLE_STUB,y:Q0Y},
   };
   const geo={boxW,boxH,shapes,labels,pins};
   return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
@@ -382,23 +387,24 @@ function srlatchGeometry(ox,oy,name,orientation){
 function renderSrlatchCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
 function renderSrlatchSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-// DFLIPFLOP — boxW 70→80, d0=oy+20, c0=oy+80, S0X=R0X=ox+40
+// DFLIPFLOP — boxW=4*PIN_PITCH, boxH=5*PIN_PITCH
+// d0=oy+PIN_PITCH, c0=oy+4*PIN_PITCH; S0 top, R0 bottom
 function dflipflopGeometry(ox,oy,name,orientation){
-  const boxW=80,boxH=100,PAD=10,TRI=7;
-  const d0Y=oy+20,c0Y=oy+80,q0Y=d0Y,Q0Y=c0Y;
+  const boxW=4*PIN_PITCH,boxH=5*PIN_PITCH,PAD=10,TRI=7;
+  const d0Y=oy+PIN_PITCH,c0Y=oy+4*PIN_PITCH,q0Y=d0Y,Q0Y=c0Y;
   const S0X=ox+boxW/2,R0X=ox+boxW/2;
   const shapes=[
     {type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5},
-    {type:'line',x1:S0X,y1:oy-BUBBLE*2-STUB,x2:S0X,y2:oy-BUBBLE*2,lineWidth:1.5},
+    {type:'line',x1:S0X,y1:oy-BUBBLE*2-BUBBLE_STUB,x2:S0X,y2:oy-BUBBLE*2,lineWidth:1.5},
     {type:'circle',cx:S0X,cy:oy-BUBBLE,r:BUBBLE,lineWidth:1.5},
     {type:'circle',cx:R0X,cy:oy+boxH+BUBBLE,r:BUBBLE,lineWidth:1.5},
-    {type:'line',x1:R0X,y1:oy+boxH+BUBBLE*2,x2:R0X,y2:oy+boxH+BUBBLE*2+STUB,lineWidth:1.5},
+    {type:'line',x1:R0X,y1:oy+boxH+BUBBLE*2,x2:R0X,y2:oy+boxH+BUBBLE*2+BUBBLE_STUB,lineWidth:1.5},
     {type:'line',x1:ox-STUB,y1:d0Y,x2:ox,y2:d0Y,lineWidth:1.5},
     {type:'line',x1:ox-STUB,y1:c0Y,x2:ox,y2:c0Y,lineWidth:1.5},
     {type:'clockTriangle',x:ox,y:c0Y,size:TRI,dir:'right',lineWidth:1.5},
     {type:'line',x1:ox+boxW,y1:q0Y,x2:ox+boxW+STUB,y2:q0Y,lineWidth:1.5},
     {type:'circle',cx:ox+boxW+BUBBLE,cy:Q0Y,r:BUBBLE,lineWidth:1.5},
-    {type:'line',x1:ox+boxW+BUBBLE*2,y1:Q0Y,x2:ox+boxW+BUBBLE*2+STUB,y2:Q0Y,lineWidth:1.5},
+    {type:'line',x1:ox+boxW+BUBBLE*2,y1:Q0Y,x2:ox+boxW+BUBBLE*2+BUBBLE_STUB,y2:Q0Y,lineWidth:1.5},
   ];
   const labels=[
     {x:ox+boxW/2,y:oy+boxH/2,text:name,kind:'name',align:'center'},
@@ -409,9 +415,9 @@ function dflipflopGeometry(ox,oy,name,orientation){
     {x:ox+boxW-PAD,y:Q0Y,text:'Q',kind:'pin',align:'right'},
   ];
   const pins={
-    S0:{x:S0X,y:oy-BUBBLE*2-STUB},R0:{x:R0X,y:oy+boxH+BUBBLE*2+STUB},
+    S0:{x:S0X,y:oy-BUBBLE*2-BUBBLE_STUB},R0:{x:R0X,y:oy+boxH+BUBBLE*2+BUBBLE_STUB},
     d0:{x:ox-STUB,y:d0Y},c0:{x:ox-STUB,y:c0Y},
-    q0:{x:ox+boxW+STUB,y:q0Y},Q0:{x:ox+boxW+BUBBLE*2+STUB,y:Q0Y},
+    q0:{x:ox+boxW+STUB,y:q0Y},Q0:{x:ox+boxW+BUBBLE*2+BUBBLE_STUB,y:Q0Y},
   };
   const geo={boxW,boxH,shapes,labels,pins};
   return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
@@ -419,25 +425,25 @@ function dflipflopGeometry(ox,oy,name,orientation){
 function renderDflipflopCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
 function renderDflipflopSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-// REG — boxW 70→80, pinSpacing=PIN_SPACE
+// REG — boxW=4*PIN_PITCH, boxH=max(numBits+1,4)*PIN_PITCH, pin spacing=PIN_PITCH, BUBBLE_STUB
 function regGeometry(ox,oy,name,numBits,orientation){
-  const boxW=80,TRI=7,PAD=10;
-  const boxH=Math.max(numBits+1,4)*PIN_SPACE;
+  const boxW=4*PIN_PITCH,TRI=7,PAD=10;
+  const boxH=Math.max(numBits+1,4)*PIN_PITCH;
   const cX=ox+boxW/2,rX=ox+boxW/2;
   const shapes=[
     {type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5},
     {type:'line',x1:cX,y1:oy-STUB,x2:cX,y2:oy,lineWidth:1.5},
     {type:'clockTriangle',x:cX,y:oy,size:TRI,dir:'down',lineWidth:1.5},
     {type:'circle',cx:rX,cy:oy+boxH+BUBBLE,r:BUBBLE,lineWidth:1.5},
-    {type:'line',x1:rX,y1:oy+boxH+BUBBLE*2,x2:rX,y2:oy+boxH+BUBBLE*2+STUB,lineWidth:1.5},
+    {type:'line',x1:rX,y1:oy+boxH+BUBBLE*2,x2:rX,y2:oy+boxH+BUBBLE*2+BUBBLE_STUB,lineWidth:1.5},
   ];
   const labels=[
     {x:ox+boxW/2,y:oy+boxH/2,text:name,kind:'name',align:'center'},
     {x:rX,y:oy+boxH-PAD,text:'R',kind:'pin',align:'center'},
   ];
-  const pins={c0:{x:cX,y:oy-STUB},R0:{x:rX,y:oy+boxH+BUBBLE*2+STUB}};
+  const pins={c0:{x:cX,y:oy-STUB},R0:{x:rX,y:oy+boxH+BUBBLE*2+BUBBLE_STUB}};
   for(let i=0;i<numBits;i++){
-    const py=oy+PIN_SPACE*(i+1);
+    const py=oy+PIN_PITCH*(i+1);
     shapes.push({type:'line',x1:ox-STUB,y1:py,x2:ox,y2:py,lineWidth:1.5});
     shapes.push({type:'line',x1:ox+boxW,y1:py,x2:ox+boxW+STUB,y2:py,lineWidth:1.5});
     labels.push({x:ox+PAD,y:py,text:`d${i}`,kind:'pin',align:'left'});
@@ -451,15 +457,15 @@ function regGeometry(ox,oy,name,numBits,orientation){
 function renderRegCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
 function renderRegSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-// PANEL — boxW 70→80, pinSpacing=PIN_SPACE
+// PANEL — boxW=4*PIN_PITCH, boxH=max(numBits+1,4)*PIN_PITCH, pin spacing=PIN_PITCH
 function panelGeometry(ox,oy,name,numBits,orientation){
-  const boxW=80,PAD=10;
-  const boxH=Math.max(numBits+1,4)*PIN_SPACE;
+  const boxW=4*PIN_PITCH,PAD=10;
+  const boxH=Math.max(numBits+1,4)*PIN_PITCH;
   const shapes=[{type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5}];
   const labels=[{x:ox+boxW/2,y:oy+boxH/2,text:name,kind:'name',align:'center'}];
   const pins={};
   for(let i=0;i<numBits;i++){
-    const py=oy+PIN_SPACE*(i+1);
+    const py=oy+PIN_PITCH*(i+1);
     shapes.push({type:'line',x1:ox-STUB,y1:py,x2:ox,y2:py,lineWidth:1.5});
     shapes.push({type:'line',x1:ox+boxW,y1:py,x2:ox+boxW+STUB,y2:py,lineWidth:1.5});
     labels.push({x:ox+PAD,y:py,text:`i${i}`,kind:'pin',align:'left'});
@@ -473,40 +479,40 @@ function panelGeometry(ox,oy,name,numBits,orientation){
 function renderPanelCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
 function renderPanelSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
 
-// ADDWORD — all spacings exact PIN_SPACE multiples
-// iX=ox+PIN_SPACE, coX=ox+boxW-PIN_SPACE
+// ADDWORD — all pin spacings = PIN_PITCH
+// iX=ox+PIN_PITCH, coX=ox+boxW-PIN_PITCH
 function addwordGeometry(ox,oy,name,numBits,orientation){
   const PAD=10;
-  const boxH=Math.max(numBits+1,3)*PIN_SPACE;
-  const boxW=Math.max(numBits+1,4)*PIN_SPACE;
+  const boxH=Math.max(numBits+1,3)*PIN_PITCH;
+  const boxW=Math.max(numBits+1,4)*PIN_PITCH;
   const shapes=[{type:'rect',x:ox,y:oy,w:boxW,h:boxH,lineWidth:1.5}];
   const labels=[{x:ox+boxW/2,y:oy+boxH/2,text:name,kind:'name',align:'center'}];
   const pins={};
   for(let i=0;i<numBits;i++){
-    const px=ox+PIN_SPACE*(i+1);
+    const px=ox+PIN_PITCH*(i+1);
     shapes.push({type:'line',x1:px,y1:oy-STUB,x2:px,y2:oy,lineWidth:1.5});
     labels.push({x:px,y:oy+PAD,text:`a${i}`,kind:'pin',align:'center'});
     pins[`a${i}`]={x:px,y:oy-STUB};
   }
   for(let i=0;i<numBits;i++){
-    const py=oy+PIN_SPACE*(i+1);
+    const py=oy+PIN_PITCH*(i+1);
     shapes.push({type:'line',x1:ox-STUB,y1:py,x2:ox,y2:py,lineWidth:1.5});
     labels.push({x:ox+PAD,y:py,text:`b${i}`,kind:'pin',align:'left'});
     pins[`b${i}`]={x:ox-STUB,y:py};
   }
   for(let i=0;i<numBits;i++){
-    const py=oy+PIN_SPACE*(i+1);
+    const py=oy+PIN_PITCH*(i+1);
     shapes.push({type:'line',x1:ox+boxW,y1:py,x2:ox+boxW+STUB,y2:py,lineWidth:1.5});
     labels.push({x:ox+boxW-PAD,y:py,text:`s${i}`,kind:'pin',align:'right'});
     pins[`s${i}`]={x:ox+boxW+STUB,y:py};
   }
-  const iX=ox+PIN_SPACE;
+  const iX=ox+PIN_PITCH;
   shapes.push({type:'line',x1:iX,y1:oy+boxH,x2:iX,y2:oy+boxH+STUB,lineWidth:1.5});
-  labels.push({x:iX,y:oy+boxH-PAD,text:'ci',kind:'pin',align:'center'});
+  labels.push({x:iX,y:oy+boxH-PAD,text:'i0',kind:'pin',align:'center'});
   pins['i0']={x:iX,y:oy+boxH+STUB};
-  const cX=ox+boxW-PIN_SPACE;
+  const cX=ox+boxW-PIN_PITCH;
   shapes.push({type:'line',x1:cX,y1:oy+boxH,x2:cX,y2:oy+boxH+STUB,lineWidth:1.5});
-  labels.push({x:cX,y:oy+boxH-PAD,text:'co',kind:'pin',align:'center'});
+  labels.push({x:cX,y:oy+boxH-PAD,text:'o0',kind:'pin',align:'center'});
   pins['o0']={x:cX,y:oy+boxH+STUB};
   const geo={boxW,boxH,shapes,labels,pins};
   return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
@@ -517,9 +523,10 @@ const addbitGeometry=(ox,oy,name,orientation)=>addwordGeometry(ox,oy,name,1,orie
 const renderAddbitCanvas=renderAddwordCanvas;
 const renderAddbitSVG=renderAddwordSVG;
 
-// NETSOURCE — shaft (stub) leading to a solid arrowhead triangle.
-// In right orientation: i0 pin at left, arrow points right.
-// arrowH=40 (totalH=40, pin at y=20 on grid), arrowW=20.
+// NETSOURCE — "-->" style: shaft extends from pin all the way to arrow tip,
+// two wing lines go back from tip forming the ">" chevron.  No filled shape.
+// In right orientation: i0 pin at left, tip at right.
+// arrowH=40, arrowW=20, shaft+arrow span = totalW=40.
 function netsourceGeometry(ox,oy,name,orientation){
   const arrowW=20,arrowH=40,totalW=STUB+arrowW,totalH=arrowH;
   const angles={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2};
@@ -528,18 +535,15 @@ function netsourceGeometry(ox,oy,name,orientation){
   if(orientation==='right'||orientation==='left'){pivotX=ox+totalW/2;pivotY=oy+totalH/2;}
   else{pivotX=ox+totalH/2;pivotY=oy+totalW/2;}
   function l2c(lx,ly){return _l2c(pivotX,pivotY,totalW,totalH,cos,sin,lx,ly);}
-  // shaft: pin → base of arrowhead
-  const [px,py]=l2c(0,arrowH/2);
-  const [sx2,sy2]=l2c(STUB,arrowH/2);
-  // arrowhead triangle: back-top, tip, back-bottom
-  const [v1x,v1y]=l2c(STUB,0);
-  const [v2x,v2y]=l2c(STUB+arrowW,arrowH/2);
-  const [v3x,v3y]=l2c(STUB,arrowH);
-  // name label just past the tip
-  const [nx,ny]=l2c(STUB+arrowW+4,arrowH/2);
+  const [px,py]  =l2c(0,          arrowH/2);   // pin (shaft start)
+  const [v2x,v2y]=l2c(STUB+arrowW,arrowH/2);   // tip  (shaft end, chevron vertex)
+  const [v1x,v1y]=l2c(STUB,       0);           // chevron back-top
+  const [v3x,v3y]=l2c(STUB,       arrowH);      // chevron back-bottom
+  const [nx,ny]  =l2c(STUB+arrowW+4,arrowH/2); // name label
   const shapes=[
-    {type:'line',x1:px,y1:py,x2:sx2,y2:sy2,lineWidth:1.5},
-    {type:'polygon',points:[[v1x,v1y],[v2x,v2y],[v3x,v3y]],lineWidth:1.5},
+    {type:'line',x1:px, y1:py, x2:v2x,y2:v2y,lineWidth:1.5},   // shaft → tip
+    {type:'line',x1:v2x,y1:v2y,x2:v1x,y2:v1y,lineWidth:1.5},   // tip → back-top
+    {type:'line',x1:v2x,y1:v2y,x2:v3x,y2:v3y,lineWidth:1.5},   // tip → back-bottom
   ];
   let nameAlign;
   if(orientation==='right')nameAlign='left';else if(orientation==='left')nameAlign='right';else nameAlign='center';
@@ -651,7 +655,9 @@ const state={
   selScrollY:0,
   placing:null,
   panAnchor:null,
-  fileHandle:null,
+  writeHandle:null, // handle from showSaveFilePicker — always writable
+  lastHandle:null,  // any handle — used for startIn directory hint
+  lastName:null,    // suggested filename for next save picker
 };
 
 // --- DOM refs ---
@@ -702,7 +708,7 @@ function computeDeviceBounds(geo){
 }
 function computeBoundsWithBuffer(geo){
   const vb=computeDeviceBounds(geo);
-  const BUF=2*PIN_SPACE,tol=2;
+  const BUF=PIN_SPACE,tol=2;  // 1 fine-grid tick (10px) buffer around pin edges
   let hL=false,hR=false,hT=false,hB=false;
   for(const p of Object.values(geo.pins)){
     if(Math.abs(p.x-vb.minX)<tol)hL=true;
@@ -712,7 +718,7 @@ function computeBoundsWithBuffer(geo){
   }
   return{minX:vb.minX-(hL?BUF:0),minY:vb.minY-(hT?BUF:0),maxX:vb.maxX+(hR?BUF:0),maxY:vb.maxY+(hB?BUF:0)};
 }
-function boxesOverlap(a,b){return a.minX<b.maxX&&a.maxX>b.minX&&a.minY<b.maxY&&a.maxY>b.minY;}
+function boxesOverlap(a,b){return a.minX<=b.maxX&&a.maxX>=b.minX&&a.minY<=b.maxY&&a.maxY>=b.minY;}
 function checkInterference(geo,exclude){
   const nb=computeBoundsWithBuffer(geo);
   for(const d of state.devices){
@@ -729,10 +735,11 @@ function generateName(type){
   return type+state.nameCounters[type];
 }
 function recalcNameCounters(){
+  // Count existing devices by type so the next auto-name continues correctly
+  // regardless of what the existing devices are named.
   state.nameCounters={};
   for(const d of state.devices){
-    const m=d.name.match(/^([a-zA-Z]+)(\d+)$/);
-    if(m){const k=m[1].toLowerCase(),n=parseInt(m[2]);state.nameCounters[k]=Math.max(state.nameCounters[k]||0,n);}
+    state.nameCounters[d.type]=(state.nameCounters[d.type]||0)+1;
   }
 }
 
@@ -740,13 +747,18 @@ function recalcNameCounters(){
 function getSelCfg(type){
   const def=DEVICE_DEFS[type],s=state.selectionParams[type];
   return{
-    params:s?{...def.defaultParams,...s.params}:{...def.defaultParams},
-    orientation:s?.orientation||(def.orientations?def.orientations[0]:'right'),
+    params:      s?{...def.defaultParams,...s.params}:{...def.defaultParams},
+    orientation: s?.orientation||(def.orientations?def.orientations[0]:'right'),
+    nextName:    s?.nextName||null,
   };
 }
-function setSelCfg(type,params,orientation){
-  state.selectionParams[type]={params:{...params},orientation};
+function setSelCfg(type,params,orientation,nextName){
+  state.selectionParams[type]={params:{...params},orientation,nextName:nextName||null};
   state.selectionLayout=null;
+}
+// Return the name that generateName(type) would produce without side-effects
+function previewNextName(type){
+  return type+((state.nameCounters[type]||0)+1);
 }
 
 // --- Canvas sizing ---
@@ -777,7 +789,7 @@ function renderNormalView(){
   }
 }
 function renderGrid(ox,oy){
-  const L=-ox,T=-oy,R=canvas.width-ox,B=canvas.height-oy,maj=PIN_SPACE*5;
+  const L=-ox,T=-oy,R=canvas.width-ox,B=canvas.height-oy,maj=PIN_PITCH*5; // 100px major lines
   ctx.fillStyle='rgba(0,0,0,0.07)';
   const gx0=Math.ceil(L/PIN_SPACE)*PIN_SPACE,gy0=Math.ceil(T/PIN_SPACE)*PIN_SPACE;
   for(let gx=gx0;gx<=R;gx+=PIN_SPACE)
@@ -889,7 +901,19 @@ function startPlacing(type,sx,sy){
   if(type==='gnd'&&state.devices.some(d=>d.type==='gnd')){
     logMsg('Error: only one GND device allowed');return;
   }
-  const cfg=getSelCfg(type),name=generateName(type);
+  const cfg=getSelCfg(type);
+  let name;
+  if(cfg.nextName){
+    name=cfg.nextName;
+    // Check for duplicate name
+    if(state.devices.some(d=>d.name===name)){
+      logMsg(`Error: name "${name}" already in use.`);return;
+    }
+    // Clear nextName so the next placement gets auto-generated
+    if(state.selectionParams[type])state.selectionParams[type].nextName=null;
+  }else{
+    name=generateName(type);
+  }
   const ref=makeGeo(type,0,0,name,cfg.params,cfg.orientation);
   const rb=computeDeviceBounds(ref);
   state.placing={type,params:cfg.params,orientation:cfg.orientation,name,
@@ -951,30 +975,59 @@ function deserializeState(json){
   recalcNameCounters();return true;
 }
 async function saveLdraw(){
+  // In file:// origins, handles from showOpenFilePicker are read-only and
+  // requestPermission() throws.  We only reuse handles obtained from
+  // showSaveFilePicker (stored in state.writeHandle).
   try{
     const json=serializeState();
-    if(state.fileHandle){
-      const w=await state.fileHandle.createWritable();await w.write(json);await w.close();
-      logMsg(`Saved ${state.fileHandle.name}`);
-    }else{
-      const h=await window.showSaveFilePicker({
-        suggestedName:'circuit.ldraw',
-        types:[{description:'ldraw files',accept:{'application/json':['.ldraw']}}],
-      });
-      const w=await h.createWritable();await w.write(json);await w.close();
-      state.fileHandle=h;logMsg(`Saved ${h.name}`);
+    let h=state.writeHandle;
+    console.log('Debug: saveLdraw writeHandle=',h?h.name:'null',
+      'lastHandle=',state.lastHandle?state.lastHandle.name:'null',
+      'lastName=',state.lastName);
+    if(h){
+      console.log('Debug: attempting createWritable on existing handle');
+      try{
+        const w=await h.createWritable();
+        await w.write(json);await w.close();
+        logMsg(`Saved ${h.name}`);
+        console.log('Debug: save via existing handle succeeded');
+        return;
+      }catch(e){
+        console.log('Debug: existing handle failed ('+e.message+'), falling through to picker');
+        state.writeHandle=null;
+      }
     }
-  }catch(e){if(e.name!=='AbortError')logMsg('Save error: '+e.message);}
+    const opts={
+      suggestedName: state.lastName||'circuit.ldraw',
+      types:[{description:'ldraw files',accept:{'application/json':['.ldraw']}}],
+    };
+    if(state.lastHandle) opts.startIn=state.lastHandle;
+    console.log('Debug: opening save picker, suggestedName='+opts.suggestedName);
+    const newH=await window.showSaveFilePicker(opts);
+    const w=await newH.createWritable();await w.write(json);await w.close();
+    state.writeHandle=newH;state.lastHandle=newH;state.lastName=newH.name;
+    logMsg(`Saved ${newH.name}`);
+    console.log('Debug: save via picker succeeded, handle stored');
+  }catch(e){
+    if(e.name!=='AbortError'){logMsg('Save error: '+e.message);console.log('Debug: save error',e);}
+  }
 }
 async function loadLdraw(){
   try{
-    const [h]=await window.showOpenFilePicker({
-      types:[{description:'ldraw files',accept:{'application/json':['.ldraw']}}],
-    });
+    const opts={types:[{description:'ldraw files',accept:{'application/json':['.ldraw']}}]};
+    if(state.lastHandle) opts.startIn=state.lastHandle;
+    console.log('Debug: opening load picker, startIn=',state.lastHandle?state.lastHandle.name:'null');
+    const [h]=await window.showOpenFilePicker(opts);
     const f=await h.getFile(),t=await f.text();
     if(deserializeState(t)){
-      state.fileHandle=h;state.mode='idle';
+      // h is read-only in file:// origins — do NOT store as writeHandle.
+      // Remember it only for directory + filename hints.
+      state.writeHandle=null;
+      state.lastHandle=h;
+      state.lastName=h.name;
+      state.mode='idle';
       logMsg(`Loaded ${h.name} — ${state.devices.length} device(s)`);
+      console.log('Debug: load succeeded, writeHandle cleared, lastName='+h.name);
       render();
     }
   }catch(e){if(e.name!=='AbortError')logMsg('Load error: '+e.message);}
@@ -984,7 +1037,7 @@ function handleFileDrop(file){
   const r=new FileReader();
   r.onload=()=>{
     if(deserializeState(r.result)){
-      state.fileHandle=null;state.mode='idle';
+      state.writeHandle=null;state.lastName=file.name;state.mode='idle';
       logMsg(`Loaded ${file.name} (dropped) — ${state.devices.length} device(s)`);
       render();
     }
@@ -996,10 +1049,11 @@ function handleFileDrop(file){
 let ppType=null;
 function showParamEditor(type,sx,sy){
   const def=DEVICE_DEFS[type];
-  if(!def.orientations&&def.paramSpecs.length===0)return;
   ppType=type;
   const cfg=getSelCfg(type);
+  const defaultName=cfg.nextName||previewNextName(type);
   let h=`<h3>${def.label}</h3>`;
+  h+=`<div class="pp-row"><label>Name</label><input type="text" id="pp-name" value="${defaultName}" style="width:100%;padding:2px 4px;font-size:13px;border:1px solid #aaa;border-radius:2px;"></div>`;
   if(def.orientations){
     h+=`<div class="pp-row"><label>Orientation</label><select id="pp-orient">`;
     for(const o of def.orientations)h+=`<option value="${o}"${o===cfg.orientation?' selected':''}>${o}</option>`;
@@ -1015,6 +1069,8 @@ function showParamEditor(type,sx,sy){
   if(px+pw>window.innerWidth)px=sx-pw-10;
   if(py<0)py=10;
   paramPopup.style.left=px+'px';paramPopup.style.top=py+'px';
+  const nInp=document.getElementById('pp-name');
+  if(nInp){nInp.addEventListener('change',applyPP);nInp.addEventListener('input',applyPP);}
   const osel=document.getElementById('pp-orient');
   if(osel)osel.addEventListener('change',applyPP);
   for(const sp of def.paramSpecs){
@@ -1025,14 +1081,16 @@ function showParamEditor(type,sx,sy){
 function applyPP(){
   if(!ppType)return;
   const def=DEVICE_DEFS[ppType];
+  const nInp=document.getElementById('pp-name');
+  const nextName=nInp&&nInp.value.trim()?nInp.value.trim():null;
   const osel=document.getElementById('pp-orient');
-  const orient=osel?osel.value:'right';
+  const orient=osel?osel.value:(def.orientations?def.orientations[0]:'right');
   const params={...def.defaultParams};
   for(const sp of def.paramSpecs){
     const inp=document.getElementById(`pp-${sp.key}`);
     if(inp){let v=parseInt(inp.value);if(isNaN(v))v=def.defaultParams[sp.key];params[sp.key]=Math.max(sp.min,Math.min(sp.max,v));}
   }
-  setSelCfg(ppType,params,orient);render();
+  setSelCfg(ppType,params,orient,nextName);render();
 }
 function hidePP(){paramPopup.style.display='none';ppType=null;}
 
