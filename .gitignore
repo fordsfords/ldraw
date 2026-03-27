@@ -5,6 +5,7 @@ x.*
 *.tmp
 *.tmp[0-9]
 tmp.*
+Zone.Identifier
 ~*
 *~
 *.bak
