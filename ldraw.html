@@ -23,7 +23,7 @@
 //   name    - instance name string, drawn centered on body, always upright
 //
 // Orientation:
-//   nand, led, swtch accept orientation: 'right'|'left'|'up'|'down'
+//   nand, led, swtch, netsource, netsink accept orientation: 'right'|'left'|'up'|'down'
 //   Box devices (clk, mem, srlatch, dflipflop, reg, panel, addword, addbit)
 //     accept orientation: 'right'|'left' (mirror)
 //   gnd, vcc are fixed orientation (no rotation).
@@ -38,10 +38,9 @@
 //
 // Completed symbols:
 //   nand, led, swtch, gnd, vcc, clk, mem, srlatch, dflipflop, reg, panel,
-//   addbit (= addword with numBits=1), addword
+//   addbit (= addword with numBits=1), addword, netsource, netsink
 //
 // Not yet implemented:
-//   Named nets (net labels / invisible wires) — see lsim_draw.md TBD section
 //   Bus rendering (thick wires for `b` commands)
 //   Wire routing (manual waypoints and future auto-router)
 //   Component placement, drag, and edit interactions
@@ -782,6 +781,131 @@ const renderAddbitCanvas = renderAddwordCanvas;
 const renderAddbitSVG    = renderAddwordSVG;
 
 // =============================================================================
+// NETSOURCE (named net source)
+// =============================================================================
+// Right-pointing arrowhead (unfilled triangle) with net name label beside the
+// tip. Single input pin i0 on the stub side (left in 'right' orientation).
+// Supports all four orientations.
+//
+// 'right' layout (local coords):
+//        ___
+//   i0--\   \
+//        >   netname
+//   pin  /___/
+//   stub  arrow
+// =============================================================================
+
+function netsourceGeometry(ox,oy,name,orientation) {
+  const STUB=18,arrowW=24,arrowH=20;
+  const totalW=STUB+arrowW,totalH=arrowH;
+  const angles={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2};
+  const angle=angles[orientation]??0;
+  const cos=Math.cos(angle),sin=Math.sin(angle);
+  let pivotX,pivotY;
+  if (orientation==='right'||orientation==='left') {
+    pivotX=ox+totalW/2; pivotY=oy+totalH/2;
+  } else {
+    pivotX=ox+totalH/2; pivotY=oy+totalW/2;
+  }
+  function l2c(lx,ly){return _l2c(pivotX,pivotY,totalW,totalH,cos,sin,lx,ly);}
+
+  // Input pin and stub
+  const [px,py]=l2c(0,arrowH/2);
+  const [sx,sy]=l2c(STUB,arrowH/2);
+  // Arrowhead triangle
+  const [t1x,t1y]=l2c(STUB,0);
+  const [t2x,t2y]=l2c(STUB+arrowW,arrowH/2);
+  const [t3x,t3y]=l2c(STUB,arrowH);
+  // Name label — placed beyond the arrow tip
+  const [nx,ny]=l2c(STUB+arrowW+6,arrowH/2);
+
+  const shapes=[
+    {type:'line',x1:px,y1:py,x2:sx,y2:sy,lineWidth:1.5},
+    {type:'polygon',points:[[t1x,t1y],[t2x,t2y],[t3x,t3y]],lineWidth:1.5},
+  ];
+
+  let nameAlign;
+  if (orientation==='right') nameAlign='left';
+  else if (orientation==='left') nameAlign='right';
+  else nameAlign='center';
+
+  const labels=[{x:nx,y:ny,text:name,kind:'name',align:nameAlign}];
+  const pins={i0:{x:px,y:py}};
+  return {totalW,totalH,shapes,labels,pins,angle};
+}
+
+function renderNetsourceCanvas(ctx,geo,fg,mid,bg) {
+  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
+  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
+}
+function renderNetsourceSVG(geo,fg,mid,bg) {
+  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
+}
+
+// =============================================================================
+// NETSINK (named net sink)
+// =============================================================================
+// Chevron (V-shape) with point toward the output pin. Single output pin o0 on
+// the stub side (right in 'right' orientation). Net name label on the open side.
+// Supports all four orientations.
+//
+// 'right' layout (local coords):
+//             \
+//              \
+//   netname     >--o0
+//              /   pin
+//             /    stub
+//          chevron
+// =============================================================================
+
+function netsinkGeometry(ox,oy,name,orientation) {
+  const STUB=18,chevW=24,chevH=20;
+  const totalW=chevW+STUB,totalH=chevH;
+  const angles={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2};
+  const angle=angles[orientation]??0;
+  const cos=Math.cos(angle),sin=Math.sin(angle);
+  let pivotX,pivotY;
+  if (orientation==='right'||orientation==='left') {
+    pivotX=ox+totalW/2; pivotY=oy+totalH/2;
+  } else {
+    pivotX=ox+totalH/2; pivotY=oy+totalW/2;
+  }
+  function l2c(lx,ly){return _l2c(pivotX,pivotY,totalW,totalH,cos,sin,lx,ly);}
+
+  // Chevron arms
+  const [v1x,v1y]=l2c(0,0);
+  const [v2x,v2y]=l2c(chevW,chevH/2);
+  const [v3x,v3y]=l2c(0,chevH);
+  // Output pin
+  const [px,py]=l2c(chevW+STUB,chevH/2);
+  // Name label — placed on the open side of the chevron
+  const [nx,ny]=l2c(-6,chevH/2);
+
+  const shapes=[
+    {type:'line',x1:v1x,y1:v1y,x2:v2x,y2:v2y,lineWidth:1.5},
+    {type:'line',x1:v3x,y1:v3y,x2:v2x,y2:v2y,lineWidth:1.5},
+    {type:'line',x1:v2x,y1:v2y,x2:px,y2:py,lineWidth:1.5},
+  ];
+
+  let nameAlign;
+  if (orientation==='right') nameAlign='right';
+  else if (orientation==='left') nameAlign='left';
+  else nameAlign='center';
+
+  const labels=[{x:nx,y:ny,text:name,kind:'name',align:nameAlign}];
+  const pins={o0:{x:px,y:py}};
+  return {totalW,totalH,shapes,labels,pins,angle};
+}
+
+function renderNetsinkCanvas(ctx,geo,fg,mid,bg) {
+  _renderShapesCanvas(ctx,geo.shapes,fg,bg);
+  _renderLabelsCanvas(ctx,geo.labels,fg,mid);
+}
+function renderNetsinkSVG(geo,fg,mid,bg) {
+  return [..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');
+}
+
+// =============================================================================
 // DEVICE TYPE DISPATCH TABLE
 // =============================================================================
 // Maps .lsim device type strings to their geometry functions.
@@ -803,6 +927,8 @@ const SYMBOL_FACTORIES = {
   panel:      (ox,oy,name,params,orient) => panelGeometry(ox,oy,name,params.numBits,orient),
   addbit:     (ox,oy,name,params,orient) => addbitGeometry(ox,oy,name,orient),
   addword:    (ox,oy,name,params,orient) => addwordGeometry(ox,oy,name,params.numBits,orient),
+  netsource:  (ox,oy,name,params,orient) => netsourceGeometry(ox,oy,name,orient),
+  netsink:    (ox,oy,name,params,orient) => netsinkGeometry(ox,oy,name,orient),
 };
 
 const CANVAS_RENDERERS = {
@@ -811,6 +937,7 @@ const CANVAS_RENDERERS = {
   mem: renderMemCanvas, srlatch: renderSrlatchCanvas, dflipflop: renderDflipflopCanvas,
   reg: renderRegCanvas, panel: renderPanelCanvas,
   addbit: renderAddbitCanvas, addword: renderAddwordCanvas,
+  netsource: renderNetsourceCanvas, netsink: renderNetsinkCanvas,
 };
 
 const SVG_RENDERERS = {
@@ -819,6 +946,7 @@ const SVG_RENDERERS = {
   mem: renderMemSVG, srlatch: renderSrlatchSVG, dflipflop: renderDflipflopSVG,
   reg: renderRegSVG, panel: renderPanelSVG,
   addbit: renderAddbitSVG, addword: renderAddwordSVG,
+  netsource: renderNetsourceSVG, netsink: renderNetsinkSVG,
 };
 
 </script>
