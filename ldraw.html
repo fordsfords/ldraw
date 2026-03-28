@@ -65,6 +65,14 @@ html, body { width:100%; height:100%; overflow:hidden; background:#e8e6df; font-
     <div class="ctx-sep"></div>
     <div class="ctx-item" id="ctx-dev-delete" style="color:#c00;">Delete</div>
   </div>
+  <!-- Pin / wire context menu (shown when right-clicking an output pin or floating wire end) -->
+  <div id="ctxPin" style="display:none">
+    <div class="ctx-item-label" id="ctx-pin-title" style="padding:4px 16px 6px;font-weight:bold;font-size:12px;color:#666;cursor:default;"></div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-pin-newwire">New Wire</div>
+    <div class="ctx-item" id="ctx-pin-orient">Change Orientation</div>
+    <div class="ctx-item" id="ctx-pin-delwire" style="color:#c00;">Delete Wire</div>
+  </div>
 </div>
 <div id="paramPopup"></div>
 <div id="logPanel"></div>
@@ -682,8 +690,11 @@ const DEVICE_TYPE_ORDER=Object.keys(DEVICE_DEFS);
 const state={
   mode:'idle',
   devices:[],
+  wires:[],           // Phase 3: wire objects
   panX:0,panY:0,
   nameCounters:{},
+  wireIdCounter:0,    // Phase 3: next wire ID number
+  segIdCounter:0,     // Phase 3: next segment ID number
   selectionParams:{},
   selectionLayout:null,
   selScrollY:0,
@@ -705,9 +716,11 @@ const paramPopup=document.getElementById('paramPopup');
 const ctxMenu  =document.getElementById('ctxMenu');
 const ctxCanvas =document.getElementById('ctxCanvas');
 const ctxDevice =document.getElementById('ctxDevice');
+const ctxPin    =document.getElementById('ctxPin');
 const logPanel =document.getElementById('logPanel');
 
 let ctxDeviceTarget=null; // device object that was right-clicked
+let ctxPinTarget=null;    // {device, pinId, wire} for pin/wire context menu
 
 // --- Log panel (replaces console.log for user-visible messages) ---
 // --- Audio feedback ---
@@ -817,6 +830,131 @@ function recalcNameCounters(){
   }
 }
 
+// --- Wire helpers (Phase 3) ---
+const PIN_HIT_RADIUS=PIN_SPACE; // 10px tolerance for pin hit testing
+
+// Output pin prefixes per device type. A pin whose ID starts with one of these
+// letters is an output; all others are inputs.
+const OUTPUT_PIN_PREFIXES={
+  nand:['o'],led:[],swtch:['o'],gnd:['o'],vcc:['o'],
+  clk:['q','Q'],mem:['o'],srlatch:['q','Q'],dflipflop:['q','Q'],
+  reg:['q'],panel:['o'],addbit:['s','o'],addword:['s','o'],
+  netsource:[],netsink:['o'],
+};
+function isOutputPin(deviceType,pinId){
+  const prefixes=OUTPUT_PIN_PREFIXES[deviceType];
+  if(!prefixes)return false;
+  return prefixes.some(p=>pinId.startsWith(p));
+}
+
+function hitTestPin(cx,cy){
+  // Returns {device, pinId, pin} if (cx,cy) is within tolerance of a pin tip, else null
+  let best=null,bestD=PIN_HIT_RADIUS;
+  for(const d of state.devices){
+    for(const [pid,pin] of Object.entries(d.geo.pins)){
+      const dx=cx-pin.x,dy=cy-pin.y,dist=Math.sqrt(dx*dx+dy*dy);
+      if(dist<bestD){bestD=dist;best={device:d,pinId:pid,pin};}
+    }
+  }
+  return best;
+}
+
+function hitTestWireEnd(cx,cy){
+  // Returns {wire, segment} if (cx,cy) is near the floating downstream end of a segment
+  let best=null,bestD=PIN_HIT_RADIUS;
+  for(const w of state.wires){
+    for(const seg of w.segments){
+      if(seg.downstream.type!=='floating')continue;
+      const dx=cx-seg.endX,dy=cy-seg.endY,dist=Math.sqrt(dx*dx+dy*dy);
+      if(dist<bestD){bestD=dist;best={wire:w,segment:seg};}
+    }
+  }
+  return best;
+}
+
+function findWireByOutput(deviceName,pinId){
+  return state.wires.find(w=>w.srcDev===deviceName&&w.srcPin===pinId)||null;
+}
+
+function getSegmentStart(wire){
+  // Returns {x,y} of the upstream end (the output pin position)
+  const dev=state.devices.find(d=>d.name===wire.srcDev);
+  if(!dev)return{x:0,y:0};
+  const pin=dev.geo.pins[wire.srcPin];
+  return{x:pin.x,y:pin.y};
+}
+
+function createWire(device,pinId){
+  const pin=device.geo.pins[pinId];
+  if(!pin)return;
+  state.wireIdCounter++;
+  state.segIdCounter++;
+  const dir=pin.dir;
+  // Compute end position: one grid unit from pin in the pin's direction
+  let endX=pin.x,endY=pin.y;
+  if(dir==='right')endX+=PIN_SPACE;
+  else if(dir==='left')endX-=PIN_SPACE;
+  else if(dir==='down')endY+=PIN_SPACE;
+  else if(dir==='up')endY-=PIN_SPACE;
+  const wire={
+    id:'w'+state.wireIdCounter,
+    srcDev:device.name,
+    srcPin:pinId,
+    segments:[{
+      id:'s'+state.segIdCounter,
+      orientation:dir,
+      upstream:{type:'pin'},
+      downstream:{type:'floating'},
+      endX,endY,
+      waypoints:[],
+    }],
+    branchPoints:[],
+  };
+  state.wires.push(wire);
+  return wire;
+}
+
+function deleteWire(wire){
+  const idx=state.wires.indexOf(wire);
+  if(idx>=0)state.wires.splice(idx,1);
+}
+
+function cycleSegmentOrientation(wire,seg){
+  // Cycle through valid orientations (exclude reversal toward device body)
+  const dev=state.devices.find(d=>d.name===wire.srcDev);
+  if(!dev)return;
+  const pin=dev.geo.pins[wire.srcPin];
+  if(!pin)return;
+  const pinDir=pin.dir;
+  // Opposite of pin dir is forbidden
+  const opposite={left:'right',right:'left',up:'down',down:'up'}[pinDir];
+  const all=['right','down','left','up'];
+  const valid=all.filter(d=>d!==opposite);
+  const curIdx=valid.indexOf(seg.orientation);
+  const newDir=valid[(curIdx+1)%valid.length];
+  // Recompute endX/endY maintaining minimum length of 1 grid unit from pin
+  seg.orientation=newDir;
+  seg.endX=pin.x;seg.endY=pin.y;
+  if(newDir==='right')seg.endX+=PIN_SPACE;
+  else if(newDir==='left')seg.endX-=PIN_SPACE;
+  else if(newDir==='down')seg.endY+=PIN_SPACE;
+  else if(newDir==='up')seg.endY-=PIN_SPACE;
+  // Changing orientation disconnects any downstream connection
+  if(seg.downstream.type==='pin')seg.downstream={type:'floating'};
+}
+
+function recalcWireCounters(){
+  state.wireIdCounter=0;state.segIdCounter=0;
+  for(const w of state.wires){
+    const wm=w.id.match(/^w(\d+)$/);
+    if(wm)state.wireIdCounter=Math.max(state.wireIdCounter,parseInt(wm[1],10));
+    for(const s of w.segments){
+      const sm=s.id.match(/^s(\d+)$/);
+      if(sm)state.segIdCounter=Math.max(state.segIdCounter,parseInt(sm[1],10));
+    }
+  }
+}
+
 // --- Selection config ---
 function getSelCfg(type){
   const def=DEVICE_DEFS[type],s=state.selectionParams[type];
@@ -854,6 +992,8 @@ function renderNormalView(){
   const ox=canvas.width/2+state.panX,oy=canvas.height/2+state.panY;
   ctx.setTransform(1,0,0,1,ox,oy);
   renderGrid(ox,oy);
+  // Phase 3: draw wires first (behind devices)
+  renderWires();
   const movingDevice=state.moving?state.moving.device:null;
   for(const d of state.devices){
     if(d===movingDevice)continue; // skip original position while dragging
@@ -870,6 +1010,29 @@ function renderNormalView(){
     const r=CANVAS_RENDERERS[state.moving.device.type];
     if(r)r(ctx,state.moving.geo,SYM_FG,SYM_MID,SYM_BG);
     ctx.restore();
+  }
+}
+function renderWires(){
+  const DOT_R=3;
+  for(const w of state.wires){
+    const start=getSegmentStart(w);
+    for(const seg of w.segments){
+      const isFloating=seg.downstream.type==='floating';
+      const color=isFloating?'#cc9900':'#222';
+      // Draw segment line
+      ctx.beginPath();
+      ctx.moveTo(start.x,start.y);
+      ctx.lineTo(seg.endX,seg.endY);
+      ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.stroke();
+      // Draw dot at upstream (pin connection) end
+      ctx.beginPath();ctx.arc(start.x,start.y,DOT_R,0,Math.PI*2);
+      ctx.fillStyle=color;ctx.fill();
+      // Draw dot at downstream end if connected
+      if(!isFloating){
+        ctx.beginPath();ctx.arc(seg.endX,seg.endY,DOT_R,0,Math.PI*2);
+        ctx.fillStyle=color;ctx.fill();
+      }
+    }
   }
 }
 function renderGrid(ox,oy){
@@ -1046,27 +1209,30 @@ function finishPanning(){
   state.panAnchor=null;state.mode='idle';canvas.style.cursor='default';
 }
 
-// --- Undo (Phase 2) ---
+// --- Undo ---
 function pushUndo(){
-  // Deep-copy the devices array (params and position are plain objects, safe to JSON-round-trip)
-  const snap=state.devices.map(d=>({
+  // Deep-copy devices and wires
+  const devSnap=state.devices.map(d=>({
     type:d.type,name:d.name,
     params:JSON.parse(JSON.stringify(d.params)),
     position:{...d.position},
     orientation:d.orientation,
     geo:d.geo, // geo is recomputed from position; sharing the ref is fine here
   }));
-  state.undoStack.push(snap);
+  const wireSnap=JSON.parse(JSON.stringify(state.wires));
+  state.undoStack.push({devices:devSnap,wires:wireSnap});
 }
 function popUndo(){
   if(state.undoStack.length===0){logMsg('Nothing to undo.');return;}
   hideCtxMenu();
   const snap=state.undoStack.pop();
-  state.devices=snap.map(d=>{
+  state.devices=snap.devices.map(d=>{
     const geo=makeGeo(d.type,d.position.x,d.position.y,d.name,d.params,d.orientation);
     return{type:d.type,name:d.name,params:d.params,position:d.position,orientation:d.orientation,geo};
   });
+  state.wires=snap.wires;
   recalcNameCounters();
+  recalcWireCounters();
   setDirty();
   render();
   logMsg('Undo.');
@@ -1114,16 +1280,26 @@ function cancelMoving(){
 
 // --- File I/O ---
 function serializeState(){
-  return JSON.stringify({version:1,
+  return JSON.stringify({version:2,
     devices:state.devices.map(d=>({type:d.type,name:d.name,params:d.params,
       x:d.position.x,y:d.position.y,orientation:d.orientation})),
-    wires:[]},null,2);
+    wires:state.wires.map(w=>({
+      id:w.id,srcDev:w.srcDev,srcPin:w.srcPin,
+      segments:w.segments.map(s=>({
+        id:s.id,orientation:s.orientation,
+        upstream:s.upstream,downstream:s.downstream,
+        endX:s.endX,endY:s.endY,waypoints:s.waypoints,
+      })),
+      branchPoints:w.branchPoints,
+    }))},null,2);
 }
 function deserializeState(json){
   let data;
   try{data=JSON.parse(json);}catch(e){logMsg('Oops! Invalid JSON');return false;}
   if(!data.version||!Array.isArray(data.devices)){logMsg('Oops! Invalid .ldraw format');return false;}
+  if(data.version!==2){logMsg(`Oops! Unsupported file version ${data.version} (expected 2)`);return false;}
   state.devices=[];
+  state.wires=[];
   state.undoStack=[];
   for(const d of data.devices){
     if(!SYMBOL_FACTORIES[d.type]){logMsg(`Oops! Unknown type "${d.type}", skipped`);continue;}
@@ -1131,7 +1307,24 @@ function deserializeState(json){
     const geo=makeGeo(d.type,d.x,d.y,d.name,params,orient);
     state.devices.push({type:d.type,name:d.name,params,position:{x:d.x,y:d.y},orientation:orient,geo});
   }
-  recalcNameCounters();return true;
+  if(Array.isArray(data.wires)){
+    for(const w of data.wires){
+      state.wires.push({
+        id:w.id,srcDev:w.srcDev,srcPin:w.srcPin,
+        segments:(w.segments||[]).map(s=>({
+          id:s.id,orientation:s.orientation,
+          upstream:s.upstream||{type:'pin'},
+          downstream:s.downstream||{type:'floating'},
+          endX:s.endX,endY:s.endY,
+          waypoints:s.waypoints||[],
+        })),
+        branchPoints:w.branchPoints||[],
+      });
+    }
+  }
+  recalcNameCounters();
+  recalcWireCounters();
+  return true;
 }
 async function saveLdraw(){
   // In file:// origins, handles from showOpenFilePicker are read-only and
@@ -1191,7 +1384,7 @@ async function loadLdraw(){
       state.lastName=h.name;
       state.mode='idle';
       clearDirty();
-      logMsg(`Loaded ${h.name} — ${state.devices.length} device(s)`);
+      logMsg(`Loaded ${h.name} — ${state.devices.length} device(s), ${state.wires.length} wire(s)`);
       console.log('Debug: load succeeded, writeHandle cleared, lastName='+h.name);
       render();
     }
@@ -1207,7 +1400,7 @@ function handleFileDrop(file){
     if(deserializeState(r.result)){
       state.writeHandle=null;state.lastName=file.name;state.mode='idle';
       clearDirty();
-      logMsg(`Loaded ${file.name} (dropped) — ${state.devices.length} device(s)`);
+      logMsg(`Loaded ${file.name} (dropped) — ${state.devices.length} device(s), ${state.wires.length} wire(s)`);
       render();
     }
   };
@@ -1272,6 +1465,7 @@ function showCtxMenu(sx,sy){
 function hideCtxMenu(){
   ctxMenu.style.display='none';
   ctxDeviceTarget=null;
+  ctxPinTarget=null;
 }
 function showCanvasCtxMenu(sx,sy){
   const hasUndo=state.undoStack.length>0;
@@ -1279,6 +1473,7 @@ function showCanvasCtxMenu(sx,sy){
   document.getElementById('ctx-undo').style.cursor=hasUndo?'pointer':'default';
   ctxCanvas.style.display='';
   ctxDevice.style.display='none';
+  ctxPin.style.display='none';
   showCtxMenu(sx,sy);
 }
 function showDeviceCtxMenu(device,sx,sy){
@@ -1287,9 +1482,23 @@ function showDeviceCtxMenu(device,sx,sy){
   document.getElementById('ctx-dev-name').value=device.name;
   ctxCanvas.style.display='none';
   ctxDevice.style.display='';
+  ctxPin.style.display='none';
   showCtxMenu(sx,sy);
   // Focus the rename input after the menu is visible
   setTimeout(()=>document.getElementById('ctx-dev-name').focus(),0);
+}
+function showPinCtxMenu(device,pinId,wire,sx,sy){
+  ctxPinTarget={device,pinId,wire};
+  const hasWire=!!wire;
+  document.getElementById('ctx-pin-title').textContent=
+    device.name+'.'+pinId+(hasWire?' — wire '+wire.id:'');
+  document.getElementById('ctx-pin-newwire').style.display=hasWire?'none':'';
+  document.getElementById('ctx-pin-orient').style.display=hasWire?'':'none';
+  document.getElementById('ctx-pin-delwire').style.display=hasWire?'':'none';
+  ctxCanvas.style.display='none';
+  ctxDevice.style.display='none';
+  ctxPin.style.display='';
+  showCtxMenu(sx,sy);
 }
 
 function enterSelectionMode(){
@@ -1324,7 +1533,15 @@ function doRename(){
     logMsg(`Oops! Name "${newName}" already in use.`);return;
   }
   pushUndo();
+  const oldName=d.name;
   d.name=newName;
+  // Update wire references to this device
+  for(const w of state.wires){
+    if(w.srcDev===oldName)w.srcDev=newName;
+    for(const seg of w.segments){
+      if(seg.downstream.type==='pin'&&seg.downstream.dev===oldName)seg.downstream.dev=newName;
+    }
+  }
   // Recompute geo so the name label updates
   d.geo=makeGeo(d.type,d.position.x,d.position.y,d.name,d.params,d.orientation);
   logMsg(`Renamed to "${newName}".`);
@@ -1342,6 +1559,32 @@ document.getElementById('ctx-dev-delete').addEventListener('click',()=>{
   pushUndo();
   state.devices.splice(state.devices.indexOf(d),1);
   logMsg(`Deleted "${d.name}".`);
+  setDirty();
+  hideCtxMenu();render();
+});
+
+// Pin / wire context menu actions
+document.getElementById('ctx-pin-newwire').addEventListener('click',()=>{
+  const t=ctxPinTarget;if(!t)return;
+  pushUndo();
+  const w=createWire(t.device,t.pinId);
+  logMsg(`Created wire ${w.id} on ${t.device.name}.${t.pinId}`);
+  setDirty();
+  hideCtxMenu();render();
+});
+document.getElementById('ctx-pin-orient').addEventListener('click',()=>{
+  const t=ctxPinTarget;if(!t||!t.wire)return;
+  pushUndo();
+  cycleSegmentOrientation(t.wire,t.wire.segments[0]);
+  logMsg(`Changed orientation of wire ${t.wire.id} to ${t.wire.segments[0].orientation}`);
+  setDirty();
+  hideCtxMenu();render();
+});
+document.getElementById('ctx-pin-delwire').addEventListener('click',()=>{
+  const t=ctxPinTarget;if(!t||!t.wire)return;
+  pushUndo();
+  deleteWire(t.wire);
+  logMsg(`Deleted wire ${t.wire.id}`);
   setDirty();
   hideCtxMenu();render();
 });
@@ -1390,9 +1633,25 @@ canvas.addEventListener('contextmenu',e=>{
     // Right-click on background of selection view → exit
     state.mode='idle';render();return;
   }
-  // Normal / idle mode: hit-test for device first
+  // Normal / idle mode: check pin, wire end, device, canvas — in priority order
   if(state.mode==='idle'){
     const c=screenToCanvas(e.clientX,e.clientY);
+    // Check floating wire end first
+    const wEnd=hitTestWireEnd(c.x,c.y);
+    if(wEnd){
+      const dev=state.devices.find(d=>d.name===wEnd.wire.srcDev);
+      if(dev){
+        showPinCtxMenu(dev,wEnd.wire.srcPin,wEnd.wire,e.clientX,e.clientY);
+        return;
+      }
+    }
+    // Check output pin (for new wire or existing wire management)
+    const pinHit=hitTestPin(c.x,c.y);
+    if(pinHit&&isOutputPin(pinHit.device.type,pinHit.pinId)){
+      const wire=findWireByOutput(pinHit.device.name,pinHit.pinId);
+      showPinCtxMenu(pinHit.device,pinHit.pinId,wire,e.clientX,e.clientY);
+      return;
+    }
     const dev=hitTestDevice(c.x,c.y);
     if(dev){
       showDeviceCtxMenu(dev,e.clientX,e.clientY);
