@@ -741,3 +741,38 @@ mode and insert one character and hit escape, that consumes an undo slot. If I e
 escape without any insert, it does not consume an undo. BUT! If I enter insert mode, insert a character, deleted
 that character, and hit esacape, it is "effectively" a no-op but it DOES consume an undo slot.
 So even vim has trouble differentiating. Handle this in whichever way is the least complex.
+
+### Data Representation
+
+The following is a conceptual sketch of the data model for wiring.
+It should not be seen as "handcuffs" during implementation,
+but changes to it should be made with due consideration to all code areas
+that rely on the data model.
+
+A wire is a collection of wire segments and branch points.
+It forms a binary tree with branch points as the nodes of the tree.
+The tree does not need to be balanced; its structure will be
+fully under the control of the user.
+In phase 3 we are not doing branch points yet,
+but the data model should allow for them.
+
+A wire is associated with a device output pin which drives the wire.
+So the wire contains a reference to a (device name, output pin name),
+and a device's output pin contains a refreence to a (wire, wire segment).
+
+A segment has two ends and a list of waypoints. In phase 3 we are not doing waypoints yet,
+but the data model should allow for them.
+
+One end of a segment is called "upstream" and is graphically closer to
+the output pin to which the overall wire attaches.
+The other end is called "downstream".
+A segment can be "floating", which means that its downstream end is
+not connected to anything.
+In phase 3, the only thing we will connect a downstream segment end to
+is a device input pin. In phase 4 it can also connect to a branch point.
+The data model will need to differentiate between them.
+
+An orphaned wire would be one that has no device output pin associated
+with it. We are designing the UI to prevent the creation of orphaned
+wires, so every existing wire must have a device output pin.
+(In contrast, orphaned devices with no connections to them are perfectly fine.)
