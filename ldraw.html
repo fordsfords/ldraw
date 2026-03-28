@@ -70,7 +70,6 @@ html, body { width:100%; height:100%; overflow:hidden; background:#e8e6df; font-
     <div class="ctx-item-label" id="ctx-pin-title" style="padding:4px 16px 6px;font-weight:bold;font-size:12px;color:#666;cursor:default;"></div>
     <div class="ctx-sep"></div>
     <div class="ctx-item" id="ctx-pin-newwire">New Wire</div>
-    <div class="ctx-item" id="ctx-pin-orient">Change Orientation</div>
     <div class="ctx-item" id="ctx-pin-delwire" style="color:#c00;">Delete Wire</div>
   </div>
 </div>
@@ -103,7 +102,7 @@ const BUBBLE_STUB = STUB - 2*BUBBLE; // line portion before bubble = 10
 // --- Shared helpers ---
 function _l2c(pvX,pvY,tW,tH,cos,sin,lx,ly){
   const dx=lx-tW/2,dy=ly-tH/2;
-  return [pvX+dx*cos-dy*sin, pvY+dx*sin+dy*cos];
+  return [Math.round(pvX+dx*cos-dy*sin), Math.round(pvY+dx*sin+dy*cos)];
 }
 function _p(n){return Math.round(n*100)/100;}
 
@@ -282,9 +281,6 @@ function ledGeometry(ox,oy,name,orientation){
   const pins={i0:{x:sx1,y:sy1,dir:_rotateDir('left',orientation)}};
   return{totalW,totalH,shapes,labels,pins,angle};
 }
-function renderLedCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
-function renderLedSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
-
 // SWITCH — radius=PIN_PITCH (20px)
 function swtchGeometry(ox,oy,name,orientation){
   const radius=PIN_PITCH,totalW=radius*2+STUB,totalH=radius*2;
@@ -301,9 +297,6 @@ function swtchGeometry(ox,oy,name,orientation){
   const pins={o0:{x:sx2,y:sy2,dir:_rotateDir('right',orientation)}};
   return{totalW,totalH,shapes,labels,pins,angle};
 }
-function renderSwtchCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
-function renderSwtchSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
-
 // GND — w=2*PIN_PITCH, no name label
 function gndGeometry(ox,oy,name){
   const w=2*PIN_PITCH,h=PIN_PITCH,stubLen=PIN_PITCH,totalW=w,totalH=stubLen+h,cx=ox+totalW/2;
@@ -315,9 +308,6 @@ function gndGeometry(ox,oy,name){
   const pins={o0:{x:cx,y:oy,dir:'up'}};
   return{totalW,totalH,shapes,labels,pins};
 }
-function renderGndCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
-function renderGndSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
-
 // VCC — w=2*PIN_PITCH, no name label
 function vccGeometry(ox,oy,name){
   const w=2*PIN_PITCH,h=PIN_PITCH,stubLen=PIN_PITCH,totalW=w,totalH=stubLen+h,cx=ox+totalW/2;
@@ -329,9 +319,6 @@ function vccGeometry(ox,oy,name){
   const pins={o0:{x:cx,y:oy+totalH,dir:'down'}};
   return{totalW,totalH,shapes,labels,pins};
 }
-function renderVccCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
-function renderVccSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
-
 // CLK — boxW=4*PIN_PITCH, boxH=5*PIN_PITCH; q0 at oy+PIN_PITCH, Q0 at oy+3*PIN_PITCH
 // R0 at bottom centre. BUBBLE/BUBBLE_STUB make q0 and Q0 extend equally from box.
 function clkGeometry(ox,oy,name,orientation){
@@ -360,9 +347,6 @@ function clkGeometry(ox,oy,name,orientation){
   const geo={boxW,boxH,shapes,labels,pins};
   return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
 }
-function renderClkCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
-function renderClkSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
-
 // MEM — dataSpacing=PIN_SPACE (exact), w0 pin at ox+PIN_SPACE
 function memGeometry(ox,oy,name,numAddr,numData,orientation){
   const MIN_PINS=4;
@@ -395,9 +379,6 @@ function memGeometry(ox,oy,name,numAddr,numData,orientation){
   const geo={boxW,boxH,shapes,labels,pins};
   return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
 }
-function renderMemCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
-function renderMemSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
-
 // SRLATCH — boxW=4*PIN_PITCH, boxH=4*PIN_PITCH; S0/q0 at oy+PIN_PITCH, R0/Q0 at oy+3*PIN_PITCH
 function srlatchGeometry(ox,oy,name,orientation){
   const boxW=4*PIN_PITCH,boxH=4*PIN_PITCH,PAD=10;
@@ -426,9 +407,6 @@ function srlatchGeometry(ox,oy,name,orientation){
   const geo={boxW,boxH,shapes,labels,pins};
   return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
 }
-function renderSrlatchCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
-function renderSrlatchSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
-
 // DFLIPFLOP — boxW=4*PIN_PITCH, boxH=5*PIN_PITCH
 // d0=oy+PIN_PITCH, c0=oy+4*PIN_PITCH; S0 top, R0 bottom
 function dflipflopGeometry(ox,oy,name,orientation){
@@ -464,9 +442,6 @@ function dflipflopGeometry(ox,oy,name,orientation){
   const geo={boxW,boxH,shapes,labels,pins};
   return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
 }
-function renderDflipflopCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
-function renderDflipflopSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
-
 // REG — boxW=4*PIN_PITCH, boxH=max(numBits+1,4)*PIN_PITCH, pin spacing=PIN_PITCH, BUBBLE_STUB
 function regGeometry(ox,oy,name,numBits,orientation){
   const boxW=4*PIN_PITCH,TRI=7,PAD=10;
@@ -496,9 +471,6 @@ function regGeometry(ox,oy,name,numBits,orientation){
   const geo={boxW,boxH,shapes,labels,pins};
   return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
 }
-function renderRegCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
-function renderRegSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
-
 // PANEL — boxW=4*PIN_PITCH, boxH=max(numBits+1,4)*PIN_PITCH, pin spacing=PIN_PITCH
 function panelGeometry(ox,oy,name,numBits,orientation){
   const boxW=4*PIN_PITCH,PAD=10;
@@ -518,9 +490,6 @@ function panelGeometry(ox,oy,name,numBits,orientation){
   const geo={boxW,boxH,shapes,labels,pins};
   return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
 }
-function renderPanelCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
-function renderPanelSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
-
 // ADDWORD — all pin spacings = PIN_PITCH
 // iX=ox+PIN_PITCH, coX=ox+boxW-PIN_PITCH
 function addwordGeometry(ox,oy,name,numBits,orientation){
@@ -559,12 +528,6 @@ function addwordGeometry(ox,oy,name,numBits,orientation){
   const geo={boxW,boxH,shapes,labels,pins};
   return orientation==='left'?_mirrorBoxGeo(geo,ox+boxW/2):geo;
 }
-function renderAddwordCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
-function renderAddwordSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
-const addbitGeometry=(ox,oy,name,orientation)=>addwordGeometry(ox,oy,name,1,orientation);
-const renderAddbitCanvas=renderAddwordCanvas;
-const renderAddbitSVG=renderAddwordSVG;
-
 // NETSOURCE — "-->" style: shaft extends from pin all the way to arrow tip,
 // two wing lines go back from tip forming the ">" chevron.  No filled shape.
 // In right orientation: i0 pin at left, tip at right.
@@ -593,9 +556,6 @@ function netsourceGeometry(ox,oy,name,orientation){
   const pins={i0:{x:px,y:py,dir:_rotateDir('left',orientation)}};
   return{totalW,totalH,shapes,labels,pins,angle};
 }
-function renderNetsourceCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
-function renderNetsourceSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
-
 // NETSINK — chevH 20→40, chevW 16→20
 function netsinkGeometry(ox,oy,name,orientation){
   const chevW=20,chevH=40,totalW=chevW+STUB,totalH=chevH;
@@ -618,9 +578,6 @@ function netsinkGeometry(ox,oy,name,orientation){
   const pins={o0:{x:px,y:py,dir:_rotateDir('right',orientation)}};
   return{totalW,totalH,shapes,labels,pins,angle};
 }
-function renderNetsinkCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
-function renderNetsinkSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
-
 // =============================================================================
 // DISPATCH TABLES
 // =============================================================================
@@ -636,27 +593,18 @@ const SYMBOL_FACTORIES={
   dflipflop: (ox,oy,name,params,orient)=>dflipflopGeometry(ox,oy,name,orient),
   reg:       (ox,oy,name,params,orient)=>regGeometry(ox,oy,name,params.numBits,orient),
   panel:     (ox,oy,name,params,orient)=>panelGeometry(ox,oy,name,params.numBits,orient),
-  addbit:    (ox,oy,name,params,orient)=>addbitGeometry(ox,oy,name,orient),
+  addbit:    (ox,oy,name,params,orient)=>addwordGeometry(ox,oy,name,1,orient),
   addword:   (ox,oy,name,params,orient)=>addwordGeometry(ox,oy,name,params.numBits,orient),
   netsource: (ox,oy,name,params,orient)=>netsourceGeometry(ox,oy,name,orient),
   netsink:   (ox,oy,name,params,orient)=>netsinkGeometry(ox,oy,name,orient),
 };
-const CANVAS_RENDERERS={
-  nand:renderNandCanvas,led:renderLedCanvas,swtch:renderSwtchCanvas,
-  gnd:renderGndCanvas,vcc:renderVccCanvas,clk:renderClkCanvas,
-  mem:renderMemCanvas,srlatch:renderSrlatchCanvas,dflipflop:renderDflipflopCanvas,
-  reg:renderRegCanvas,panel:renderPanelCanvas,
-  addbit:renderAddbitCanvas,addword:renderAddwordCanvas,
-  netsource:renderNetsourceCanvas,netsink:renderNetsinkCanvas,
-};
-const SVG_RENDERERS={
-  nand:renderNandSVG,led:renderLedSVG,swtch:renderSwtchSVG,
-  gnd:renderGndSVG,vcc:renderVccSVG,clk:renderClkSVG,
-  mem:renderMemSVG,srlatch:renderSrlatchSVG,dflipflop:renderDflipflopSVG,
-  reg:renderRegSVG,panel:renderPanelSVG,
-  addbit:renderAddbitSVG,addword:renderAddwordSVG,
-  netsource:renderNetsourceSVG,netsink:renderNetsinkSVG,
-};
+// Default renderers: used by all device types except those with custom rendering (NAND)
+function _defaultRenderCanvas(ctx,geo,fg,mid,bg){_renderShapesCanvas(ctx,geo.shapes,fg,bg);_renderLabelsCanvas(ctx,geo.labels,fg,mid);}
+function _defaultRenderSVG(geo,fg,mid,bg){return[..._renderShapesSVG(geo.shapes,fg,bg),..._renderLabelsSVG(geo.labels,fg,mid)].join('\n');}
+// Override tables: only device types with custom rendering need entries here
+const CANVAS_RENDERERS={nand:renderNandCanvas};
+const SVG_RENDERERS={nand:renderNandSVG};
+function renderDevice(ctx,type,geo,fg,mid,bg){(CANVAS_RENDERERS[type]||_defaultRenderCanvas)(ctx,geo,fg,mid,bg);}
 
 // =============================================================================
 // APPLICATION
@@ -700,6 +648,7 @@ const state={
   selScrollY:0,
   placing:null,
   moving:null,      // Phase 2: device being moved
+  extending:null,   // Phase 3: wire extending state
   panAnchor:null,
   writeHandle:null, // handle from showSaveFilePicker — always writable
   lastHandle:null,  // any handle — used for startIn directory hint
@@ -807,12 +756,37 @@ function checkInterference(geo,exclude){
   }
   return null;
 }
+function checkWireInterference(geo){
+  // Check if a device's buffered bounds overlap any wire segment.
+  // Returns a description string if interference found, null if clear.
+  const db=computeBoundsWithBuffer(geo);
+  for(const w of state.wires){
+    const ws=getSegmentStart(w);
+    for(const seg of w.segments){
+      const horiz=isHorizontal(seg.orientation);
+      if(horiz){
+        // Horizontal segment: fixed y = ws.y, x range [min, max]
+        const sMinX=Math.min(ws.x,seg.endX),sMaxX=Math.max(ws.x,seg.endX);
+        if(ws.y>=db.minY&&ws.y<=db.maxY&&sMinX<=db.maxX&&sMaxX>=db.minX)
+          return'wire '+w.id;
+      }else{
+        // Vertical segment: fixed x = ws.x, y range [min, max]
+        const sMinY=Math.min(ws.y,seg.endY),sMaxY=Math.max(ws.y,seg.endY);
+        if(ws.x>=db.minX&&ws.x<=db.maxX&&sMinY<=db.maxY&&sMaxY>=db.minY)
+          return'wire '+w.id;
+      }
+    }
+  }
+  return null;
+}
 
 // --- Auto-naming ---
 function generateName(type){
   if(!state.nameCounters[type])state.nameCounters[type]=0;
-  state.nameCounters[type]++;
-  return type+state.nameCounters[type];
+  let name;
+  do { state.nameCounters[type]++; name=type+state.nameCounters[type]; }
+  while(state.devices.some(d=>d.name===name));
+  return name;
 }
 function recalcNameCounters(){
   // For each type, the counter must be at least as large as the highest numeric
@@ -919,30 +893,6 @@ function deleteWire(wire){
   if(idx>=0)state.wires.splice(idx,1);
 }
 
-function cycleSegmentOrientation(wire,seg){
-  // Cycle through valid orientations (exclude reversal toward device body)
-  const dev=state.devices.find(d=>d.name===wire.srcDev);
-  if(!dev)return;
-  const pin=dev.geo.pins[wire.srcPin];
-  if(!pin)return;
-  const pinDir=pin.dir;
-  // Opposite of pin dir is forbidden
-  const opposite={left:'right',right:'left',up:'down',down:'up'}[pinDir];
-  const all=['right','down','left','up'];
-  const valid=all.filter(d=>d!==opposite);
-  const curIdx=valid.indexOf(seg.orientation);
-  const newDir=valid[(curIdx+1)%valid.length];
-  // Recompute endX/endY maintaining minimum length of 1 grid unit from pin
-  seg.orientation=newDir;
-  seg.endX=pin.x;seg.endY=pin.y;
-  if(newDir==='right')seg.endX+=PIN_SPACE;
-  else if(newDir==='left')seg.endX-=PIN_SPACE;
-  else if(newDir==='down')seg.endY+=PIN_SPACE;
-  else if(newDir==='up')seg.endY-=PIN_SPACE;
-  // Changing orientation disconnects any downstream connection
-  if(seg.downstream.type==='pin')seg.downstream={type:'floating'};
-}
-
 function recalcWireCounters(){
   state.wireIdCounter=0;state.segIdCounter=0;
   for(const w of state.wires){
@@ -953,6 +903,206 @@ function recalcWireCounters(){
       if(sm)state.segIdCounter=Math.max(state.segIdCounter,parseInt(sm[1],10));
     }
   }
+}
+
+// --- Wire extending (Phase 3b) ---
+const OPPOSITE_DIR={left:'right',right:'left',up:'down',down:'up'};
+
+function isHorizontal(dir){return dir==='left'||dir==='right';}
+
+function findWireAtInput(deviceName,pinId){
+  // Find the wire/segment connected to a specific input pin
+  for(const w of state.wires){
+    for(const seg of w.segments){
+      if(seg.downstream.type==='pin'&&seg.downstream.dev===deviceName&&seg.downstream.pin===pinId)
+        return{wire:w,segment:seg};
+    }
+  }
+  return null;
+}
+
+// --- Phase 3c: Breaking connections helpers ---
+function deviceHasOutputWire(deviceName){
+  return state.wires.some(w=>w.srcDev===deviceName);
+}
+
+function disconnectInputWires(deviceName){
+  // Disconnect all segments connected to any input pin of this device
+  let count=0;
+  for(const w of state.wires){
+    for(const seg of w.segments){
+      if(seg.downstream.type==='pin'&&seg.downstream.dev===deviceName){
+        seg.downstream={type:'floating'};
+        count++;
+      }
+    }
+  }
+  return count;
+}
+
+function findConnectTarget(seg,wire,endX,endY){
+  // Check if (endX,endY) coincides with a compatible input pin
+  const horiz=isHorizontal(seg.orientation);
+  const start=getSegmentStart(wire);
+  const fixedAxis=horiz?start.y:start.x;
+  for(const d of state.devices){
+    // Don't connect to our own source device
+    if(d.name===wire.srcDev)continue;
+    for(const [pid,pin] of Object.entries(d.geo.pins)){
+      if(isOutputPin(d.type,pid))continue; // only input pins
+      // Check direction compatibility: segment must arrive opposite to pin dir
+      if(seg.orientation!==OPPOSITE_DIR[pin.dir])continue;
+      // Check colinear: same perpendicular axis
+      if(horiz&&pin.y!==fixedAxis)continue;
+      if(!horiz&&pin.x!==fixedAxis)continue;
+      // Check position match
+      if(pin.x===endX&&pin.y===endY){
+        // Check not already connected to another wire
+        const existing=findWireAtInput(d.name,pid);
+        if(existing&&existing.wire!==wire)continue;
+        return{device:d,pinId:pid,pin};
+      }
+    }
+  }
+  return null;
+}
+
+function checkSegmentInterference(wire,seg,endX,endY,connectTarget){
+  // Check if segment from source pin to (endX,endY) interferes with any device
+  // Returns the interfering device name string, or null if clear
+  const start=getSegmentStart(wire);
+  const srcDevName=wire.srcDev;
+  const tgtDevName=connectTarget?connectTarget.device.name:null;
+  const horiz=isHorizontal(seg.orientation);
+  // Build segment bounding box
+  const sMinX=Math.min(start.x,endX),sMaxX=Math.max(start.x,endX);
+  const sMinY=Math.min(start.y,endY),sMaxY=Math.max(start.y,endY);
+  for(const d of state.devices){
+    if(d.name===srcDevName)continue;
+    if(d.name===tgtDevName)continue;
+    const db=computeBoundsWithBuffer(d.geo);
+    // Check overlap: segment bbox vs device buffered bbox
+    // For axis-aligned segments, use "touching = interference" (<=/>= not </>) per spec
+    if(sMinX<=db.maxX&&sMaxX>=db.minX&&sMinY<=db.maxY&&sMaxY>=db.minY)return d.name;
+  }
+  // Check if endpoint is in buffer zone of any device (when NOT connecting)
+  if(!connectTarget){
+    for(const d of state.devices){
+      if(d.name===srcDevName)continue;
+      const db=computeBoundsWithBuffer(d.geo);
+      if(endX>=db.minX&&endX<=db.maxX&&endY>=db.minY&&endY<=db.maxY)return d.name;
+    }
+  }
+  // Check collinear overlap with other wire segments
+  for(const w of state.wires){
+    if(w===wire)continue;
+    const ws=getSegmentStart(w);
+    for(const os of w.segments){
+      const osHoriz=isHorizontal(os.orientation);
+      if(horiz===osHoriz){
+        // Same axis: check collinear overlap
+        if(horiz){
+          if(start.y!==ws.y)continue;
+          const a1=Math.min(start.x,endX),a2=Math.max(start.x,endX);
+          const b1=Math.min(ws.x,os.endX),b2=Math.max(ws.x,os.endX);
+          if(a1<=b2&&a2>=b1)return'wire '+w.id;
+        }else{
+          if(start.x!==ws.x)continue;
+          const a1=Math.min(start.y,endY),a2=Math.max(start.y,endY);
+          const b1=Math.min(ws.y,os.endY),b2=Math.max(ws.y,os.endY);
+          if(a1<=b2&&a2>=b1)return'wire '+w.id;
+        }
+      }
+    }
+  }
+  // Check if endpoint lands on any other wire segment (including perpendicular)
+  for(const w of state.wires){
+    if(w===wire)continue;
+    const ws=getSegmentStart(w);
+    for(const os of w.segments){
+      const osHoriz=isHorizontal(os.orientation);
+      if(osHoriz){
+        if(endY!==ws.y)continue;
+        const lo=Math.min(ws.x,os.endX),hi=Math.max(ws.x,os.endX);
+        if(endX>=lo&&endX<=hi)return'wire '+w.id;
+      }else{
+        if(endX!==ws.x)continue;
+        const lo=Math.min(ws.y,os.endY),hi=Math.max(ws.y,os.endY);
+        if(endY>=lo&&endY<=hi)return'wire '+w.id;
+      }
+    }
+  }
+  return null;
+}
+
+function startExtending(wire,seg,sx,sy){
+  pushUndo();
+  state.extending={
+    wire,seg,
+    origEndX:seg.endX,origEndY:seg.endY,
+    origDownstream:JSON.parse(JSON.stringify(seg.downstream)),
+    connectTarget:null,
+  };
+  // If was connected, disconnect visually
+  if(seg.downstream.type==='pin')seg.downstream={type:'floating'};
+  state.mode='extending';
+  canvas.style.cursor='grabbing';
+}
+
+function updateExtending(sx,sy){
+  const ext=state.extending;if(!ext)return;
+  const{wire,seg}=ext;
+  const c=screenToCanvas(sx,sy);
+  const start=getSegmentStart(wire);
+  const horiz=isHorizontal(seg.orientation);
+  let newEnd;
+  if(horiz){
+    newEnd=snapToGrid(c.x);
+    // Enforce minimum 1 grid unit from pin
+    if(seg.orientation==='right')newEnd=Math.max(start.x+PIN_SPACE,newEnd);
+    else newEnd=Math.min(start.x-PIN_SPACE,newEnd);
+    seg.endX=newEnd;seg.endY=start.y;
+  }else{
+    newEnd=snapToGrid(c.y);
+    if(seg.orientation==='down')newEnd=Math.max(start.y+PIN_SPACE,newEnd);
+    else newEnd=Math.min(start.y-PIN_SPACE,newEnd);
+    seg.endY=newEnd;seg.endX=start.x;
+  }
+  // Check for connection target
+  ext.connectTarget=findConnectTarget(seg,wire,seg.endX,seg.endY);
+}
+
+function finishExtending(){
+  const ext=state.extending;if(!ext)return;
+  const{wire,seg,origEndX,origEndY,origDownstream,connectTarget}=ext;
+  // Check interference
+  const hit=checkSegmentInterference(wire,seg,seg.endX,seg.endY,connectTarget);
+  if(hit){
+    logMsg(`Oops! Wire ${wire.id} interferes with ${hit}. Restored.`);
+    // Snap back
+    seg.endX=origEndX;seg.endY=origEndY;
+    seg.downstream=origDownstream;
+    state.undoStack.pop();
+  }else if(connectTarget){
+    // Establish connection
+    seg.downstream={type:'pin',dev:connectTarget.device.name,pin:connectTarget.pinId};
+    logMsg(`Connected wire ${wire.id} to ${connectTarget.device.name}.${connectTarget.pinId}`);
+    setDirty();
+  }else{
+    // Valid floating drop
+    seg.downstream={type:'floating'};
+    setDirty();
+  }
+  state.extending=null;state.mode='idle';canvas.style.cursor='default';render();
+}
+
+function cancelExtending(){
+  const ext=state.extending;if(!ext)return;
+  // Restore original state
+  ext.seg.endX=ext.origEndX;ext.seg.endY=ext.origEndY;
+  ext.seg.downstream=ext.origDownstream;
+  state.undoStack.pop();
+  state.extending=null;state.mode='idle';canvas.style.cursor='default';render();
 }
 
 // --- Selection config ---
@@ -997,28 +1147,31 @@ function renderNormalView(){
   const movingDevice=state.moving?state.moving.device:null;
   for(const d of state.devices){
     if(d===movingDevice)continue; // skip original position while dragging
-    const r=CANVAS_RENDERERS[d.type];if(r)r(ctx,d.geo,SYM_FG,SYM_MID,SYM_BG);
+    renderDevice(ctx,d.type,d.geo,SYM_FG,SYM_MID,SYM_BG);
   }
   if(state.placing&&state.placing.geo){
     ctx.save();ctx.globalAlpha=0.5;
-    const r=CANVAS_RENDERERS[state.placing.type];
-    if(r)r(ctx,state.placing.geo,SYM_FG,SYM_MID,SYM_BG);
+    renderDevice(ctx,state.placing.type,state.placing.geo,SYM_FG,SYM_MID,SYM_BG);
     ctx.restore();
   }
   if(state.moving&&state.moving.geo){
     ctx.save();ctx.globalAlpha=0.5;
-    const r=CANVAS_RENDERERS[state.moving.device.type];
-    if(r)r(ctx,state.moving.geo,SYM_FG,SYM_MID,SYM_BG);
+    renderDevice(ctx,state.moving.device.type,state.moving.geo,SYM_FG,SYM_MID,SYM_BG);
     ctx.restore();
   }
 }
 function renderWires(){
   const DOT_R=3;
+  const ext=state.extending;
   for(const w of state.wires){
     const start=getSegmentStart(w);
     for(const seg of w.segments){
-      const isFloating=seg.downstream.type==='floating';
-      const color=isFloating?'#cc9900':'#222';
+      const isExtending=ext&&ext.wire===w&&ext.seg===seg;
+      let isFloating=seg.downstream.type==='floating';
+      let color;
+      if(isExtending&&ext.connectTarget)color='#222'; // connection preview: black
+      else if(isFloating)color='#cc9900'; // floating: yellow
+      else color='#222'; // connected: black
       // Draw segment line
       ctx.beginPath();
       ctx.moveTo(start.x,start.y);
@@ -1027,8 +1180,8 @@ function renderWires(){
       // Draw dot at upstream (pin connection) end
       ctx.beginPath();ctx.arc(start.x,start.y,DOT_R,0,Math.PI*2);
       ctx.fillStyle=color;ctx.fill();
-      // Draw dot at downstream end if connected
-      if(!isFloating){
+      // Draw dot at downstream end if connected or if extending with connect target
+      if(!isFloating||(isExtending&&ext.connectTarget)){
         ctx.beginPath();ctx.arc(seg.endX,seg.endY,DOT_R,0,Math.PI*2);
         ctx.fillStyle=color;ctx.fill();
       }
@@ -1101,7 +1254,7 @@ function renderSelectionView(){
     ctx.fillRect(it.cellX,it.cellY,it.cellW,it.cellH);ctx.strokeRect(it.cellX,it.cellY,it.cellW,it.cellH);
     ctx.save();ctx.translate(it.drawOffX,it.drawOffY);
     if(grey)ctx.globalAlpha=0.35;
-    const r=CANVAS_RENDERERS[it.type];if(r)r(ctx,it.geo,SYM_FG,SYM_MID,SYM_BG);
+    renderDevice(ctx,it.type,it.geo,SYM_FG,SYM_MID,SYM_BG);
     ctx.restore();
     ctx.fillStyle=grey?'#999':'#333';ctx.font='12px sans-serif';
     ctx.textAlign='center';ctx.textBaseline='middle';
@@ -1160,10 +1313,6 @@ function startPlacing(type,sx,sy){
     }
     // Clear nextName so the next placement gets auto-generated
     if(state.selectionParams[type])state.selectionParams[type].nextName=null;
-    // Advance counter past any numeric suffix in the custom name so future
-    // auto-names don't collide (e.g. custom "nand5" → counter becomes 5).
-    const m=name.match(/^.*?(\d+)$/);
-    if(m){const n=parseInt(m[1],10);if(n>(state.nameCounters[type]||0))state.nameCounters[type]=n;}
   }else{
     name=generateName(type);
   }
@@ -1185,13 +1334,17 @@ function finishPlacing(){
   const hit=checkInterference(p.geo,null);
   if(hit){
     logMsg(`Oops! "${p.name}" overlaps "${hit.name}". Not placed.`);
-    state.nameCounters[p.type]=Math.max(0,(state.nameCounters[p.type]||1)-1);
   }else{
-    pushUndo();
-    state.devices.push({type:p.type,name:p.name,params:{...p.params},
-      position:{x:p.ox,y:p.oy},orientation:p.orientation,geo:p.geo});
-    logMsg(`Placed ${p.type} "${p.name}" at (${p.ox}, ${p.oy})`);
-    setDirty();
+    const whit=checkWireInterference(p.geo);
+    if(whit){
+      logMsg(`Oops! "${p.name}" overlaps ${whit}. Not placed.`);
+    }else{
+      pushUndo();
+      state.devices.push({type:p.type,name:p.name,params:{...p.params},
+        position:{x:p.ox,y:p.oy},orientation:p.orientation,geo:p.geo});
+      logMsg(`Placed ${p.type} "${p.name}" at (${p.ox}, ${p.oy})`);
+      setDirty();
+    }
   }
   state.placing=null;state.mode='idle';render();
 }
@@ -1238,15 +1391,20 @@ function popUndo(){
   logMsg('Undo.');
 }
 
-// --- Move (Phase 2) ---
+// --- Move (Phase 2, updated Phase 3c) ---
 function startMoving(device,sx,sy){
+  // Phase 3c: block move if device has output wires
+  if(deviceHasOutputWire(device.name)){
+    logMsg(`Oops! Cannot move "${device.name}" — has a connected output. Delete output wires first.`);
+    return;
+  }
   pushUndo();
   // Compute offset from canvas origin of device to cursor so the ghost stays
   // anchored under the grab point.
   const c=screenToCanvas(sx,sy);
   const grabOffX=c.x-device.position.x;
   const grabOffY=c.y-device.position.y;
-  state.moving={device,grabOffX,grabOffY,ox:device.position.x,oy:device.position.y,geo:device.geo};
+  state.moving={device,grabOffX,grabOffY,ox:device.position.x,oy:device.position.y,origX:device.position.x,origY:device.position.y,geo:device.geo};
   state.mode='moving';
   canvas.style.cursor='grabbing';
 }
@@ -1259,15 +1417,27 @@ function updateMoving(sx,sy){
 }
 function finishMoving(){
   const m=state.moving;if(!m)return;
+  // Phase 3c: null move — dropped back at starting position — is a no-op
+  if(m.ox===m.origX&&m.oy===m.origY){
+    state.undoStack.pop();
+    state.moving=null;state.mode='idle';canvas.style.cursor='default';render();
+    return;
+  }
   const hit=checkInterference(m.geo,m.device);
+  const whit=hit?null:checkWireInterference(m.geo);
   if(hit){
     logMsg(`Oops! Cannot move "${m.device.name}" — overlaps "${hit.name}". Restored.`);
-    // undo the pushUndo we did at start — the move failed so there's nothing to undo
+    state.undoStack.pop();
+  }else if(whit){
+    logMsg(`Oops! Cannot move "${m.device.name}" — overlaps ${whit}. Restored.`);
     state.undoStack.pop();
   }else{
     m.device.position={x:m.ox,y:m.oy};
     m.device.geo=m.geo;
-    logMsg(`Moved "${m.device.name}" to (${m.ox}, ${m.oy})`);
+    // Phase 3c: disconnect input wires on non-null move
+    const nDisc=disconnectInputWires(m.device.name);
+    if(nDisc>0) logMsg(`Moved "${m.device.name}" to (${m.ox}, ${m.oy}) — ${nDisc} input connection(s) broken.`);
+    else logMsg(`Moved "${m.device.name}" to (${m.ox}, ${m.oy})`);
     setDirty();
   }
   state.moving=null;state.mode='idle';canvas.style.cursor='default';render();
@@ -1391,6 +1561,7 @@ async function loadLdraw(){
   }catch(e){if(e.name!=='AbortError')logMsg('Oops! Load error: '+e.message);}
 }
 function handleFileDrop(file){
+  if(state.mode!=='idle'){logMsg('Oops! Cannot load while an operation is in progress.');return;}
   if(!file.name.endsWith('.ldraw')){logMsg('Oops! Not a .ldraw file');return;}
   if(state.dirty){
     if(!confirm('You have unsaved changes. Load anyway and discard them?'))return;
@@ -1493,7 +1664,6 @@ function showPinCtxMenu(device,pinId,wire,sx,sy){
   document.getElementById('ctx-pin-title').textContent=
     device.name+'.'+pinId+(hasWire?' — wire '+wire.id:'');
   document.getElementById('ctx-pin-newwire').style.display=hasWire?'none':'';
-  document.getElementById('ctx-pin-orient').style.display=hasWire?'':'none';
   document.getElementById('ctx-pin-delwire').style.display=hasWire?'':'none';
   ctxCanvas.style.display='none';
   ctxDevice.style.display='none';
@@ -1556,9 +1726,17 @@ document.getElementById('ctx-dev-name').addEventListener('keydown',e=>{
 });
 document.getElementById('ctx-dev-delete').addEventListener('click',()=>{
   const d=ctxDeviceTarget;if(!d)return;
+  // Phase 3c: block delete if device has output wires
+  if(deviceHasOutputWire(d.name)){
+    logMsg(`Oops! Cannot delete "${d.name}" — has a connected output. Delete output wires first.`);
+    hideCtxMenu();return;
+  }
   pushUndo();
+  // Phase 3c: disconnect input wires before removing device
+  const nDisc=disconnectInputWires(d.name);
   state.devices.splice(state.devices.indexOf(d),1);
-  logMsg(`Deleted "${d.name}".`);
+  if(nDisc>0) logMsg(`Deleted "${d.name}" — ${nDisc} input connection(s) broken.`);
+  else logMsg(`Deleted "${d.name}".`);
   setDirty();
   hideCtxMenu();render();
 });
@@ -1569,14 +1747,6 @@ document.getElementById('ctx-pin-newwire').addEventListener('click',()=>{
   pushUndo();
   const w=createWire(t.device,t.pinId);
   logMsg(`Created wire ${w.id} on ${t.device.name}.${t.pinId}`);
-  setDirty();
-  hideCtxMenu();render();
-});
-document.getElementById('ctx-pin-orient').addEventListener('click',()=>{
-  const t=ctxPinTarget;if(!t||!t.wire)return;
-  pushUndo();
-  cycleSegmentOrientation(t.wire,t.wire.segments[0]);
-  logMsg(`Changed orientation of wire ${t.wire.id} to ${t.wire.segments[0].orientation}`);
   setDirty();
   hideCtxMenu();render();
 });
@@ -1599,8 +1769,23 @@ canvas.addEventListener('mousedown',e=>{
       const it=hitTestSelection(e.clientX,e.clientY);
       if(it)startPlacing(it.type,e.clientX,e.clientY);
     }else if(state.mode==='idle'){
-      // Phase 2: check for device hit before falling through to pan
       const c=screenToCanvas(e.clientX,e.clientY);
+      // Phase 3b: check for floating wire end (grab to extend)
+      const wEnd=hitTestWireEnd(c.x,c.y);
+      if(wEnd){
+        startExtending(wEnd.wire,wEnd.segment,e.clientX,e.clientY);
+        return;
+      }
+      // Phase 3b: check for connected input pin (grab to disconnect and extend)
+      const pinHit=hitTestPin(c.x,c.y);
+      if(pinHit&&!isOutputPin(pinHit.device.type,pinHit.pinId)){
+        const conn=findWireAtInput(pinHit.device.name,pinHit.pinId);
+        if(conn){
+          startExtending(conn.wire,conn.segment,e.clientX,e.clientY);
+          return;
+        }
+      }
+      // Phase 2: check for device hit before falling through to pan
       const dev=hitTestDevice(c.x,c.y);
       if(dev){
         startMoving(dev,e.clientX,e.clientY);
@@ -1615,6 +1800,7 @@ canvas.addEventListener('mousemove',e=>{
   if(state.mode==='placing'){updatePlacing(e.clientX,e.clientY);render();}
   else if(state.mode==='panning')updatePanning(e.clientX,e.clientY);
   else if(state.mode==='moving'){updateMoving(e.clientX,e.clientY);render();}
+  else if(state.mode==='extending'){updateExtending(e.clientX,e.clientY);render();}
 });
 
 canvas.addEventListener('mouseup',e=>{
@@ -1622,6 +1808,7 @@ canvas.addEventListener('mouseup',e=>{
     if(state.mode==='placing')finishPlacing();
     else if(state.mode==='panning')finishPanning();
     else if(state.mode==='moving')finishMoving();
+    else if(state.mode==='extending')finishExtending();
   }
 });
 
@@ -1676,10 +1863,11 @@ document.addEventListener('keydown',e=>{
       state.placing=null;state.mode='idle';render();
     }
     else if(state.mode==='moving'){cancelMoving();}
+    else if(state.mode==='extending'){cancelExtending();}
   }
   if((e.ctrlKey||e.metaKey)&&e.key==='z'){
     e.preventDefault();
-    popUndo();
+    if(state.mode==='idle')popUndo();
   }
 });
 

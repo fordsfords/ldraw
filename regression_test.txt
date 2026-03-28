@@ -1,0 +1,21 @@
+The nature of a GUI program makes it difficult to write automated regression tests.
+This is a regression test suite in the form of a series of prompts.
+Having you review the code in this way is sub-optimal, but better than nothing.
+
+Prompt: Review code for opportunities to simplify the code to make it more maintainable. I prefer simple and clear over high performance and user friendliness.
+
+Prompt: Check for consistent use of the Math.round() where it is needed.
+
+Prompt: Review all functions that replace state.devices (including popUndo and deserializeState). For each one, identify any references to device objects that were captured before the replacement and may still be held afterward — in closures, in UI state like open menus or popups, or in module-level variables. Also check whether all related state (undo stack, selection state, mode) is properly reset when state.devices is replaced wholesale.
+
+Prompt: Review hitTestSelection and renderSelectionView. The selection view has a pinned header of height HDR and a scrollable content area below it. Verify that (a) hit testing correctly excludes clicks that land in the header region, and (b) the maxScroll calculation correctly limits scrolling so that the last tile row is just visible at the bottom of the viewport, with no over-scroll or under-scroll.
+
+Prompt: Scan all functions for local variables that are assigned but never read. List each one with the function name and variable name.
+
+Prompt: Find every use of innerHTML assignment where a variable is interpolated into the HTML string. For each one, determine whether the interpolated value could contain user-entered text or text loaded from a file. If so, check whether the value is escaped before interpolation.
+
+Prompt: Review all elements that use the ctx-item class. The ctx-item class applies a hover highlight intended for clickable menu actions. Check whether any element carrying this class is not a simple clickable action (e.g., it contains form inputs, buttons, or other interactive children) and would look wrong with the hover highlight.
+
+Prompt: In showParamEditor, review the event listeners registered on each input element. For each input, determine whether both 'change' and 'input' listeners are necessary. Consider what applyPP does and whether triggering it on every keystroke has unnecessary side effects, even if not visually apparent.
+
+Prompt: Review every code path that mutates state.devices (push, splice, property assignment). For each one, verify that pushUndo() is called before the mutation. Cross-reference against the README's statement that "all state-changing operations (place, move, delete, rename) are undoable."

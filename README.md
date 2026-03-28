@@ -50,13 +50,13 @@ The ldraw program will:
 
 ## Development Status
 
-ldraw is built in phases. **Phases 1 and 2 are complete.**
+ldraw is built in phases. **Phases 1, 2, and 3 are complete.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 1 | Static canvas, device placement, load/save `.ldraw` | **Complete** |
 | 2 | Device interactions: move, delete, undo, rename, dirty tracking | **Complete** |
-| 3 | Basic wires: create, extend, connect, floating-end indicator | Planned |
+| 3 | Basic wires: create, extend, connect, floating-end indicator | **Complete** |
 | 4 | Wire topology: turns (way points), branch points, tap, delete segment | Planned |
 | 5 | Named nets: cascade rename, orphan detection | Planned |
 | 6 | Export: `.lsim` generation, `.svg` export | Planned |
@@ -715,7 +715,7 @@ edited after placement.
 This is called on every mousemove during place/move. getBoundingClientRect() forces a layout reflow. For a full-screen canvas that never moves, the rect doesn't change between frames. Caching it (invalidated on resize) would be cleaner, though at this app's scale it's unlikely to be measurable.
 Decided not to act.
 
-## Next steps
+## Phase 3 details: *(Complete)*
 
 Implement phase 3: Basic wires: create, extend, connect, floating-end indicator
 
@@ -743,12 +743,12 @@ Similarly, if the user drags the end through a device, it will draw on top of th
 But dropping the segment end should perform a full interference check,
 with the same oops/snap back behavior if there is interference.
 
-**Orientation change:** Segment orientation is changed via a right-click
-context menu on the floating end of the segment (or on the output pin),
-not by dragging. The drag approach has a fundamental ambiguity between
-"user drifted off-axis" and "user wants to change direction." Right-click
-→ "Change orientation" is unambiguous. Only 90-degree changes are allowed
-(no reversal back toward the device body).
+**Orientation:** A wire segment's orientation is permanently fixed to
+the output pin's `dir` at creation time. There is no mechanism to
+change it. This mirrors the input-side constraint (segments must arrive
+from the direction the input pin faces) and eliminates a class of
+source-device interference edge cases. Reaching a target that is
+perpendicular to the output requires a waypoint (phase 4).
 
 Phase 3 does not include general waypoints.
 
@@ -792,10 +792,10 @@ or deleted.
 Exception: if a move operation is a "null move" (i.e. it is dropped back at its starting point),
 it is treated as a "no-op". No connections are broken.
 
-**No-op undo policy:** Null moves and other no-op operations (e.g.
-disconnecting and reconnecting a segment at the same point) consume an
-undo slot. Detecting true no-ops reliably across all cases would add
-complexity for little benefit.
+**No-op undo policy:** Null moves (device dropped back at starting position)
+are true no-ops: no undo slot consumed, no dirty flag, no log message.
+Other no-op cases (e.g. disconnecting and reconnecting a segment at the
+same point) still consume an undo slot.
 
 ### Data Representation
 
@@ -862,8 +862,15 @@ device context menu is shown.
 
 ### Wire Context Menu
 
-Right-clicking the floating end of a wire segment opens a context menu
-with:
+Right-clicking the floating end of a wire segment, or right-clicking the
+output pin of a device that has a wire, opens a context menu with:
 
-* **Change orientation** — rotates the segment 90° (no reversal).
 * **Delete wire** — removes the entire wire. Undoable.
+
+---
+
+## Next steps
+
+Implement phase 4: Wire topology — turns (waypoints), branch points, tap, delete segment.
+
+Phase 4 details are not yet specified.
