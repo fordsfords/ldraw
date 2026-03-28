@@ -57,7 +57,7 @@ ldraw is built in phases. **Phases 1 and 2 are complete.**
 | 1 | Static canvas, device placement, load/save `.ldraw` | **Complete** |
 | 2 | Device interactions: move, delete, undo, rename, dirty tracking | **Complete** |
 | 3 | Basic wires: create, extend, connect, floating-end indicator | Planned |
-| 4 | Wire topology: turns, branch points, tap, delete segment | Planned |
+| 4 | Wire topology: turns (way points), branch points, tap, delete segment | Planned |
 | 5 | Named nets: cascade rename, orphan detection | Planned |
 | 6 | Export: `.lsim` generation, `.svg` export | Planned |
 
@@ -100,6 +100,9 @@ to mean only what is defined here.
   - Wire segments *are* allowed to cross other wire segments at a point
     (a "+" junction), provided the crossing point is not at a waypoint or
     branch point of either segment.
+* **Oops** - an "oops" is an error message printed to the text box at the
+  bottom of the screen. It starts with "Oops!" followed by the text of the
+  error message. When printed, an audble beep is generated.
 
 ---
 
@@ -643,3 +646,98 @@ edited after placement.
 1. screenToCanvas calls getBoundingClientRect() on every invocation.
 This is called on every mousemove during place/move. getBoundingClientRect() forces a layout reflow. For a full-screen canvas that never moves, the rect doesn't change between frames. Caching it (invalidated on resize) would be cleaner, though at this app's scale it's unlikely to be measurable.
 Decided not to act.
+
+## Next steps
+
+Implement phase 3: Basic wires: create, extend, connect, floating-end indicator
+
+### Create
+
+A wire is created by right-clicking on a device's output pin and selecting "New Wire".
+This creates an underlying wire object, which itself has no visible component, and also a single grid-tick wire segment
+which attaches to the output pin. For now, I want a small dot to be visually present indicating the connection,
+even though this is not common with professional circuit design tools. Since the segment is floating, it should be
+colored yellow. The orientation of the segment should be the same as the stub it connects to.
+
+## Extend
+
+The floating end of the wire segment can be grabbed (left-click) and extended or contracted in its direction of orientation.
+It must maintain a minimal length of 1 grid unit.
+If the mouse pointer drifts off-axis, the segment should maintain its direction of orientation,
+matching the coordinate of the mouse pointer along its axis but allowing the mouse pointer to show off axis.
+I.e. the dragging end of the segment will not necessarily be directly connected to the mouse pointer.
+
+During travel, the floating end might travel through points that it is not allowed to be dropped at.
+For example, the segment is allowed to cross another wire, but is not allowed to be dropped onto a segment.
+Trying to do so should print an oops, and the segment snaps back to its original location.
+
+Similarly, if the user drags the end through a device, it will draw on top of the device.
+But dropping the segment end should perform a full interference check,
+with the same oops/snap back behavior if there is interference.
+
+QUESTION: should we allow an orientation change by allowing the connected point to act as a hinge?
+Will this greatly increase the complexity?
+Since a segment can only be horizontal or vertical, how do we differentiate between the mouse drifting off
+axis but maintaining orientation vs. detecting that the user wants to change the orientation by dragging?
+If we support this, we should not allow going "backwards" - only 90 degree orientation changes are allowed.
+And how should this be represented internally? Will it require an immediate waypoint where the segment attaches
+to an output? I doubt it, but I'll let you analyze how a connection should be represented.
+Finally, we could forgo the "change orientation by dragging" function and instead make it a right-click option
+of the pin: "change orientation". I would prefer this if both methods are feasible but the drag method is
+significantly more complex.
+
+Phase 3 does not include general waypoints.
+
+### Connect
+
+If a segment is being dragged and the mouse pointer is over a device input pin colinear with
+the segment being extended, the segment will change color to black, indicating that if the
+end is dropped at that point, it will establish a connection. Be careful - if the mouse pointer
+is off axis and pointing at a device input that is not in line with the segment,
+this should not happen.
+
+If a segment is being dropped and the mouse pointer is over a device input pin colinear with
+the segment being extended, the segment will be connected to the input.
+It's color should be black, indicating that it is no longer floating.
+There should also be a small dot where the segment touches the input stub.
+
+Note that if a segment is dropped one grid unit from an input pin, this will be interpreted
+as interfering with the device since it will be in the buffer zone of the device. It
+should print an oops and snap back.
+
+### Disconnect
+
+If the user left-clicks on a connected input pin of a device, they are effectively
+grabbing the line segment that connects to it. This visually disconnects the
+segment and enters "extend" mode. Note that at this point, the mouse pointer will be
+over an input pin, so the segment will be colored black, meaning if it is dropped,
+it will connect, But if the segment is extended or contracted, it will follow the
+rules of segment extension.
+
+If a segment is grabbed, disconnected, moved around, and dropped back at its
+starting point, this is conceptually a "no-op" (like moving a device is a no-op if it is
+dropped back at its starting point).
+
+### Breaking Connections
+
+If a device has one or more input pin connections and is moved, all connections are 
+are "broken". Same with deleting a device with one or more input connections.
+Note that a device with one or more output connections is not allowed to be moved
+or deleted.
+
+Exception: if a move operation is a "null move" (i.e. it is dropped back in its starting point),
+it is treated as a "no-op". No connections are broken.
+Note: this exception might contradict some explanation earlier in this document -
+this is the new desired behavior.
+The doc should be updated if necessary to reflect this behavior.
+
+QUESTION: This phase has mentioned "no-op" a few times. Another no-op would be a simple
+device move with no connections. This is already supported in phase 2. Note that this
+"null move" consumes an undo slot. Should it? This question becomes important when
+considering the other no-ops mentioned in phase 3 - should they consume an undo slot?
+I'm leaning toward yes. It might be difficult to say for sure if a user operation
+is truely and completely a no-op. But I will make a comparison to VIM: if I enter insert
+mode and insert one character and hit escape, that consumes an undo slot. If I enter insert mode and
+escape without any insert, it does not consume an undo. BUT! If I enter insert mode, insert a character, deleted
+that character, and hit esacape, it is "effectively" a no-op but it DOES consume an undo slot.
+So even vim has trouble differentiating. Handle this in whichever way is the least complex.
