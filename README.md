@@ -141,6 +141,10 @@ navigated to the last-used directory.
   an asterisk appears in the browser tab title. Loading a file while dirty
   prompts for confirmation. Closing or navigating away while dirty triggers
   the browser's native "leave page?" dialog.
+* **No backward compatibility.** This tool is under active development.
+  When the data model changes between phases, the `.ldraw` file version
+  number is incremented and the code is written to expect only that version.
+  There is no requirement to load files saved by earlier versions.
 
 ---
 
@@ -171,6 +175,51 @@ pretty-printed JSON for human readability and diff-friendliness.
 `x` and `y` are the `(ox, oy)` origin passed to the device's geometry
 function. They are multiples of `PIN_SPACE` (10). `wires` is present but
 empty in Phase 1; it will be populated in Phase 3.
+
+### Phase 3 schema (devices + wires)
+
+```json
+{
+  "version": 2,
+  "devices": [
+    {
+      "type": "nand",
+      "name": "nand1",
+      "params": { "numInputs": 2 },
+      "x": 100,
+      "y": 200,
+      "orientation": "right"
+    }
+  ],
+  "wires": [
+    {
+      "id": "w1",
+      "srcDev": "nand1",
+      "srcPin": "o0",
+      "segments": [
+        {
+          "id": "s1",
+          "orientation": "right",
+          "upstream": { "type": "pin" },
+          "downstream": { "type": "pin", "dev": "nand2", "pin": "i0" },
+          "endX": 200,
+          "endY": 200,
+          "waypoints": []
+        }
+      ],
+      "branchPoints": []
+    }
+  ]
+}
+```
+
+Phase 3 code expects `"version": 2` and will reject version 1 files.
+Per the backward-compatibility policy, no migration is provided.
+The `segments` array will contain exactly one segment in phase 3.
+`branchPoints` and `waypoints` are present but empty, reserved for
+phase 4. The upstream end position is derived at load time from the
+source pin's geometry. `endX`/`endY` store the downstream endpoint
+(the floating or connected end).
 
 On load, auto-name counters are reconstructed by scanning all device names
 for the highest numeric suffix of each type, so that newly placed devices
@@ -212,6 +261,9 @@ Each device object in application state contains:
 * `position` — `{x, y}` canvas coordinates (multiples of `PIN_SPACE`).
 * `orientation` — `'right'|'left'|'up'|'down'` (default `'right'`).
 * `geo` — cached geometry object, recomputed when position changes.
+  The `geo.pins` dictionary maps pin ID to `{x, y, dir}` where `dir`
+  (`'left'|'right'|'up'|'down'`) is the direction the stub points away
+  from the device body.
 
 See the lsim language document for full details of params per device type.
 
@@ -470,6 +522,12 @@ and current name. The menu provides:
   Escape dismisses without change.
 * **Delete** — removes the device from the canvas. Undoable.
 
+If the right-click is within hit-test range of an output pin, a **pin
+context menu** is shown instead, with **New Wire** (and **Change
+orientation** / **Delete wire** once a wire exists on that pin).
+Right-clicking the floating end of a wire segment also shows the wire
+context menu.
+
 ### Device movement
 
 Left-click drag on a placed device grabs it. The device disappears from its
@@ -481,15 +539,17 @@ in its original position. Escape cancels the move.
 ### Undo
 
 An unlimited undo stack is maintained. Every operation that changes canvas
-state (place, move, delete, rename) pushes a snapshot before the change.
+state (place, move, delete, rename, and all wire operations) pushes a
+snapshot before the change.
 Undo is invoked by **Ctrl+Z** (or Cmd+Z on Mac) at any time, or via the
 **Undo** item in the canvas context menu. The canvas context menu shows Undo
 greyed out when the stack is empty. A failed or cancelled move does not
 consume an undo slot.
 
-### Wire creation and editing *(Phases 3–4)*
+### Wire creation and editing *(Phase 3)*
 
-Not yet implemented. See the phase plan for the intended interaction model.
+See [Next steps](#next-steps) for the full phase 3 interaction model
+(create, extend, connect, disconnect, breaking connections).
 
 ---
 
@@ -498,7 +558,9 @@ Not yet implemented. See the phase plan for the intended interaction model.
 ### Wire-to-pin attachment *(Phase 3+)*
 
 Each pin's geometry includes a connection point (the tip of its stub line,
-stored in `pins[id] = {x, y}`). Wires attach at this point. The first
+stored in `pins[id] = {x, y, dir}`) where `dir` is
+`'left'|'right'|'up'|'down'`, indicating the direction the stub extends
+away from the device body. Wires attach at this point. The first
 run of a wire leaving an output pin must travel in the direction the stub
 points. The same constraint applies to the last run arriving at an input pin.
 
@@ -594,14 +656,18 @@ A failed or cancelled move does not push to the undo stack.
 
 #### For future when wires are added:
 
-Left clicking on a device also disconnects any input wire segments that
-might be attached, but does not delete them. Note that since those wire
-segments are floating, they will turn yellow.
+If the device has one or more output wires (floating or connected), the
+move is rejected with an oops:
+```
+Oops! Cannot move device with a connected output. Delete output wires if you want to move the device.
+```
 
-If the device has one or more outputs attached, an error dialog is displayed:
-```
-Cannot move device with a connected output. Delete output wires if you want to move the device.
-```
+If the device has input wire connections and the move completes (i.e. it
+is dropped at a new position, not its starting point), those input wire
+segments are disconnected but not deleted. They become floating and turn
+yellow. A "null move" — dropped back at the starting point — is a no-op:
+no connections are broken (but a null move still consumes an undo slot,
+per the no-op undo policy in phase 3).
 
 ### Delete
 
@@ -610,20 +676,22 @@ a delete function. If selected, the device is deleted. Undoable.
 
 #### For future when wires are added:
 
-Deleting a device also disconnects any input wire segments that might be
-attached, but does not delete them. Note that since those wire segments are
-floating, they will turn yellow.
+If the device has one or more output wires (floating or connected), the
+delete is rejected with an oops:
+```
+Oops! Cannot delete device with a connected output. Delete output wires if you want to delete the device.
+```
 
-If the device has one or more outputs attached, an error dialog is displayed:
-```
-Cannot delete device with a connected output. Delete output wires if you want to delete the device.
-```
+If the device has input wire connections, deleting it disconnects those
+wire segments but does not delete them. They become floating and turn
+yellow.
 
 ### Undo
 
 An unlimited undo stack is supported. Ctrl+Z (Cmd+Z on Mac) or the Undo
 item in the canvas context menu restores the previous state. All
-state-changing operations (place, move, delete, rename) are undoable.
+state-changing operations (place, move, delete, rename, wire create,
+wire extend, wire connect/disconnect, wire delete) are undoable.
 
 #### For future when wires are added:
 
@@ -675,16 +743,12 @@ Similarly, if the user drags the end through a device, it will draw on top of th
 But dropping the segment end should perform a full interference check,
 with the same oops/snap back behavior if there is interference.
 
-QUESTION: should we allow an orientation change by allowing the connected point to act as a hinge?
-Will this greatly increase the complexity?
-Since a segment can only be horizontal or vertical, how do we differentiate between the mouse drifting off
-axis but maintaining orientation vs. detecting that the user wants to change the orientation by dragging?
-If we support this, we should not allow going "backwards" - only 90 degree orientation changes are allowed.
-And how should this be represented internally? Will it require an immediate waypoint where the segment attaches
-to an output? I doubt it, but I'll let you analyze how a connection should be represented.
-Finally, we could forgo the "change orientation by dragging" function and instead make it a right-click option
-of the pin: "change orientation". I would prefer this if both methods are feasible but the drag method is
-significantly more complex.
+**Orientation change:** Segment orientation is changed via a right-click
+context menu on the floating end of the segment (or on the output pin),
+not by dragging. The drag approach has a fundamental ambiguity between
+"user drifted off-axis" and "user wants to change direction." Right-click
+→ "Change orientation" is unambiguous. Only 90-degree changes are allowed
+(no reversal back toward the device body).
 
 Phase 3 does not include general waypoints.
 
@@ -725,22 +789,13 @@ are "broken". Same with deleting a device with one or more input connections.
 Note that a device with one or more output connections is not allowed to be moved
 or deleted.
 
-Exception: if a move operation is a "null move" (i.e. it is dropped back in its starting point),
+Exception: if a move operation is a "null move" (i.e. it is dropped back at its starting point),
 it is treated as a "no-op". No connections are broken.
-Note: this exception might contradict some explanation earlier in this document -
-this is the new desired behavior.
-The doc should be updated if necessary to reflect this behavior.
 
-QUESTION: This phase has mentioned "no-op" a few times. Another no-op would be a simple
-device move with no connections. This is already supported in phase 2. Note that this
-"null move" consumes an undo slot. Should it? This question becomes important when
-considering the other no-ops mentioned in phase 3 - should they consume an undo slot?
-I'm leaning toward yes. It might be difficult to say for sure if a user operation
-is truely and completely a no-op. But I will make a comparison to VIM: if I enter insert
-mode and insert one character and hit escape, that consumes an undo slot. If I enter insert mode and
-escape without any insert, it does not consume an undo. BUT! If I enter insert mode, insert a character, deleted
-that character, and hit esacape, it is "effectively" a no-op but it DOES consume an undo slot.
-So even vim has trouble differentiating. Handle this in whichever way is the least complex.
+**No-op undo policy:** Null moves and other no-op operations (e.g.
+disconnecting and reconnecting a segment at the same point) consume an
+undo slot. Detecting true no-ops reliably across all cases would add
+complexity for little benefit.
 
 ### Data Representation
 
@@ -756,9 +811,13 @@ fully under the control of the user.
 In phase 3 we are not doing branch points yet,
 but the data model should allow for them.
 
+An output pin can have at most one wire. Fan-out to multiple inputs is
+achieved via branch points within that wire (phase 4+), not by attaching
+multiple wires to the same output.
+
 A wire is associated with a device output pin which drives the wire.
 So the wire contains a reference to a (device name, output pin name),
-and a device's output pin contains a refreence to a (wire, wire segment).
+and a device's output pin contains a reference to a (wire, wire segment).
 
 A segment has two ends and a list of waypoints. In phase 3 we are not doing waypoints yet,
 but the data model should allow for them.
@@ -772,7 +831,39 @@ In phase 3, the only thing we will connect a downstream segment end to
 is a device input pin. In phase 4 it can also connect to a branch point.
 The data model will need to differentiate between them.
 
+**Phase 3 constraint:** each wire has exactly one segment (no branch
+points, no waypoints). The data model should accommodate future
+multi-segment wires, but all phase 3 code can assume one segment per wire.
+
 An orphaned wire would be one that has no device output pin associated
 with it. We are designing the UI to prevent the creation of orphaned
 wires, so every existing wire must have a device output pin.
 (In contrast, orphaned devices with no connections to them are perfectly fine.)
+
+A wire — whether floating or connected — counts as a "connected output"
+for purposes of move/delete restrictions. Once a wire exists on an output
+pin, the device cannot be moved or deleted until that wire is deleted.
+
+### Pin-Level Hit Testing
+
+Phase 3 requires distinguishing clicks on pin tips from clicks on device
+bodies. A `hitTestPin(cx, cy)` function tests whether canvas coordinates
+are within a tolerance of any pin tip and returns `{device, pinId}` or
+null. This is needed for:
+
+* Right-click on an output pin → pin context menu with "New Wire" (and
+  "Change segment orientation" once a wire exists).
+* Left-click on a connected input pin → grab the attached segment
+  (enter extend mode).
+
+If a right-click hits a pin, the pin context menu is shown instead of the
+device context menu. If it hits the device body but no pin, the existing
+device context menu is shown.
+
+### Wire Context Menu
+
+Right-clicking the floating end of a wire segment opens a context menu
+with:
+
+* **Change orientation** — rotates the segment 90° (no reversal).
+* **Delete wire** — removes the entire wire. Undoable.
