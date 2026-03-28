@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>ldraw — logic circuit editor</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='4' fill='%23222'/><path d='M8 9 L8 23 L17 23 Q25 23 25 16 Q25 9 17 9 Z' fill='none' stroke='%23d0c090' stroke-width='2'/><circle cx='27' cy='16' r='2' fill='none' stroke='%23d0c090' stroke-width='1.8'/><line x1='5' y1='13' x2='8' y2='13' stroke='%23d0c090' stroke-width='2'/><line x1='5' y1='19' x2='8' y2='19' stroke='%23d0c090' stroke-width='2'/><line x1='29' y1='16' x2='31' y2='16' stroke='%23d0c090' stroke-width='2'/></svg>">
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 html, body { width:100%; height:100%; overflow:hidden; background:#e8e6df; font-family:sans-serif; }
@@ -38,13 +39,32 @@ html, body { width:100%; height:100%; overflow:hidden; background:#e8e6df; font-
 <body>
 <canvas id="canvas"></canvas>
 <div id="ctxMenu">
-  <div class="ctx-item" id="ctx-add">Add device…</div>
-  <div class="ctx-item" id="ctx-pan">Pan to x, y…</div>
-  <div class="ctx-sep"></div>
-  <div class="ctx-item" id="ctx-load">Load…</div>
-  <div class="ctx-item" id="ctx-save">Save…</div>
-  <div class="ctx-sep"></div>
-  <div class="ctx-item" id="ctx-redraw">Redraw</div>
+  <!-- Canvas context menu items (shown when right-clicking blank canvas) -->
+  <div id="ctxCanvas">
+    <div class="ctx-item" id="ctx-add">Add device…</div>
+    <div class="ctx-item" id="ctx-pan">Pan to x, y…</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-load">Load…</div>
+    <div class="ctx-item" id="ctx-save">Save…</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-undo">Undo</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-redraw">Redraw</div>
+  </div>
+  <!-- Device context menu items (shown when right-clicking a placed device) -->
+  <div id="ctxDevice" style="display:none">
+    <div class="ctx-item-label" id="ctx-dev-title" style="padding:4px 16px 6px;font-weight:bold;font-size:12px;color:#666;cursor:default;"></div>
+    <div class="ctx-sep"></div>
+    <div id="ctx-dev-rename-row" style="padding:5px 16px;">
+      <div style="font-size:11px;color:#555;margin-bottom:3px;">Rename</div>
+      <div style="display:flex;gap:4px;">
+        <input id="ctx-dev-name" type="text" style="flex:1;padding:2px 4px;font-size:12px;border:1px solid #aaa;border-radius:2px;">
+        <button id="ctx-dev-rename-ok" style="padding:2px 6px;font-size:12px;cursor:pointer;">OK</button>
+      </div>
+    </div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-dev-delete" style="color:#c00;">Delete</div>
+  </div>
 </div>
 <div id="paramPopup"></div>
 <div id="logPanel"></div>
@@ -654,10 +674,13 @@ const state={
   selectionLayout:null,
   selScrollY:0,
   placing:null,
+  moving:null,      // Phase 2: device being moved
   panAnchor:null,
   writeHandle:null, // handle from showSaveFilePicker — always writable
   lastHandle:null,  // any handle — used for startIn directory hint
   lastName:null,    // suggested filename for next save picker
+  undoStack:[],     // Phase 2: deep-copied device snapshots (unlimited)
+  dirty:false,      // true when canvas has unsaved changes
 };
 
 // --- DOM refs ---
@@ -666,9 +689,38 @@ const ctx      =canvas.getContext('2d');
 
 const paramPopup=document.getElementById('paramPopup');
 const ctxMenu  =document.getElementById('ctxMenu');
+const ctxCanvas =document.getElementById('ctxCanvas');
+const ctxDevice =document.getElementById('ctxDevice');
 const logPanel =document.getElementById('logPanel');
 
+let ctxDeviceTarget=null; // device object that was right-clicked
+
 // --- Log panel (replaces console.log for user-visible messages) ---
+// --- Audio feedback ---
+let _audioCtx=null;
+function beep(){
+  try{
+    if(!_audioCtx)_audioCtx=new AudioContext();
+    const osc=_audioCtx.createOscillator();
+    const gain=_audioCtx.createGain();
+    osc.connect(gain);gain.connect(_audioCtx.destination);
+    osc.frequency.value=440;
+    gain.gain.setValueAtTime(0.18,_audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001,_audioCtx.currentTime+0.22);
+    osc.start();osc.stop(_audioCtx.currentTime+0.22);
+  }catch(e){/* silently ignore if audio unavailable */}
+}
+
+// --- Dirty tracking ---
+function setDirty(){
+  state.dirty=true;
+  document.title='ldraw \u2014 logic circuit editor *';
+}
+function clearDirty(){
+  state.dirty=false;
+  document.title='ldraw \u2014 logic circuit editor';
+}
+
 function logMsg(msg){
   const line=document.createElement('div');
   line.textContent=msg;
@@ -676,6 +728,7 @@ function logMsg(msg){
   // Keep at most 50 lines
   while(logPanel.children.length>50)logPanel.removeChild(logPanel.firstChild);
   logPanel.scrollTop=logPanel.scrollHeight;
+  if(msg.startsWith('Oops!'))beep();
 }
 
 // --- Utilities ---
@@ -735,11 +788,18 @@ function generateName(type){
   return type+state.nameCounters[type];
 }
 function recalcNameCounters(){
-  // Count existing devices by type so the next auto-name continues correctly
-  // regardless of what the existing devices are named.
+  // For each type, the counter must be at least as large as the highest numeric
+  // suffix in use — whether that name was auto-generated or manually entered.
+  // Using only the count (as before) fails when a user manually names a device
+  // with a higher suffix (e.g. "nand3" as the first nand), leaving the counter
+  // too low and causing future auto-names to collide with manual ones.
   state.nameCounters={};
   for(const d of state.devices){
-    state.nameCounters[d.type]=(state.nameCounters[d.type]||0)+1;
+    const cur=state.nameCounters[d.type]||0;
+    // Extract trailing integer from name, if any
+    const m=d.name.match(/^.*?(\d+)$/);
+    const suffix=m?parseInt(m[1],10):0;
+    state.nameCounters[d.type]=Math.max(cur,suffix);
   }
 }
 
@@ -780,11 +840,21 @@ function renderNormalView(){
   const ox=canvas.width/2+state.panX,oy=canvas.height/2+state.panY;
   ctx.setTransform(1,0,0,1,ox,oy);
   renderGrid(ox,oy);
-  for(const d of state.devices){const r=CANVAS_RENDERERS[d.type];if(r)r(ctx,d.geo,SYM_FG,SYM_MID,SYM_BG);}
+  const movingDevice=state.moving?state.moving.device:null;
+  for(const d of state.devices){
+    if(d===movingDevice)continue; // skip original position while dragging
+    const r=CANVAS_RENDERERS[d.type];if(r)r(ctx,d.geo,SYM_FG,SYM_MID,SYM_BG);
+  }
   if(state.placing&&state.placing.geo){
     ctx.save();ctx.globalAlpha=0.5;
     const r=CANVAS_RENDERERS[state.placing.type];
     if(r)r(ctx,state.placing.geo,SYM_FG,SYM_MID,SYM_BG);
+    ctx.restore();
+  }
+  if(state.moving&&state.moving.geo){
+    ctx.save();ctx.globalAlpha=0.5;
+    const r=CANVAS_RENDERERS[state.moving.device.type];
+    if(r)r(ctx,state.moving.geo,SYM_FG,SYM_MID,SYM_BG);
     ctx.restore();
   }
 }
@@ -833,7 +903,7 @@ function computeSelectionLayout(){
 function renderSelectionView(){
   const layout=computeSelectionLayout();
   const HDR=layout.HDR;
-  const maxScroll=Math.max(0,layout.totalGridH-canvas.height+HDR);
+  const maxScroll=Math.max(0,layout.totalGridH-canvas.height);
   state.selScrollY=Math.max(0,Math.min(state.selScrollY,maxScroll));
   const scroll=state.selScrollY;
 
@@ -878,7 +948,9 @@ function renderSelectionView(){
 }
 function hitTestSelection(sx,sy){
   const layout=computeSelectionLayout();
-  const r=canvas.getBoundingClientRect(),x=sx-r.left,y=sy-r.top+state.selScrollY;
+  const r=canvas.getBoundingClientRect();
+  if(sy-r.top<layout.HDR)return null;
+  const x=sx-r.left,y=sy-r.top+state.selScrollY;
   for(const it of layout.items)if(x>=it.cellX&&x<=it.cellX+it.cellW&&y>=it.cellY&&y<=it.cellY+it.cellH)return it;
   return null;
 }
@@ -893,13 +965,13 @@ function hitTestDevice(cx,cy){
 // --- Placement ---
 function startPlacing(type,sx,sy){
   if(type==='clk'&&state.devices.some(d=>d.type==='clk')){
-    logMsg('Error: only one clock device allowed');return;
+    logMsg('Oops! Only one clock device allowed');return;
   }
   if(type==='vcc'&&state.devices.some(d=>d.type==='vcc')){
-    logMsg('Error: only one VCC device allowed');return;
+    logMsg('Oops! Only one VCC device allowed');return;
   }
   if(type==='gnd'&&state.devices.some(d=>d.type==='gnd')){
-    logMsg('Error: only one GND device allowed');return;
+    logMsg('Oops! Only one GND device allowed');return;
   }
   const cfg=getSelCfg(type);
   let name;
@@ -907,10 +979,14 @@ function startPlacing(type,sx,sy){
     name=cfg.nextName;
     // Check for duplicate name
     if(state.devices.some(d=>d.name===name)){
-      logMsg(`Error: name "${name}" already in use.`);return;
+      logMsg(`Oops! Name "${name}" already in use.`);return;
     }
     // Clear nextName so the next placement gets auto-generated
     if(state.selectionParams[type])state.selectionParams[type].nextName=null;
+    // Advance counter past any numeric suffix in the custom name so future
+    // auto-names don't collide (e.g. custom "nand5" → counter becomes 5).
+    const m=name.match(/^.*?(\d+)$/);
+    if(m){const n=parseInt(m[1],10);if(n>(state.nameCounters[type]||0))state.nameCounters[type]=n;}
   }else{
     name=generateName(type);
   }
@@ -931,12 +1007,14 @@ function finishPlacing(){
   const p=state.placing;if(!p||!p.geo)return;
   const hit=checkInterference(p.geo,null);
   if(hit){
-    logMsg(`Interference: "${p.name}" overlaps "${hit.name}". Not placed.`);
+    logMsg(`Oops! "${p.name}" overlaps "${hit.name}". Not placed.`);
     state.nameCounters[p.type]=Math.max(0,(state.nameCounters[p.type]||1)-1);
   }else{
+    pushUndo();
     state.devices.push({type:p.type,name:p.name,params:{...p.params},
       position:{x:p.ox,y:p.oy},orientation:p.orientation,geo:p.geo});
     logMsg(`Placed ${p.type} "${p.name}" at (${p.ox}, ${p.oy})`);
+    setDirty();
   }
   state.placing=null;state.mode='idle';render();
 }
@@ -954,6 +1032,72 @@ function finishPanning(){
   state.panAnchor=null;state.mode='idle';canvas.style.cursor='default';
 }
 
+// --- Undo (Phase 2) ---
+function pushUndo(){
+  // Deep-copy the devices array (params and position are plain objects, safe to JSON-round-trip)
+  const snap=state.devices.map(d=>({
+    type:d.type,name:d.name,
+    params:JSON.parse(JSON.stringify(d.params)),
+    position:{...d.position},
+    orientation:d.orientation,
+    geo:d.geo, // geo is recomputed from position; sharing the ref is fine here
+  }));
+  state.undoStack.push(snap);
+}
+function popUndo(){
+  if(state.undoStack.length===0){logMsg('Nothing to undo.');return;}
+  hideCtxMenu();
+  const snap=state.undoStack.pop();
+  state.devices=snap.map(d=>{
+    const geo=makeGeo(d.type,d.position.x,d.position.y,d.name,d.params,d.orientation);
+    return{type:d.type,name:d.name,params:d.params,position:d.position,orientation:d.orientation,geo};
+  });
+  recalcNameCounters();
+  setDirty();
+  render();
+  logMsg('Undo.');
+}
+
+// --- Move (Phase 2) ---
+function startMoving(device,sx,sy){
+  pushUndo();
+  // Compute offset from canvas origin of device to cursor so the ghost stays
+  // anchored under the grab point.
+  const c=screenToCanvas(sx,sy);
+  const grabOffX=c.x-device.position.x;
+  const grabOffY=c.y-device.position.y;
+  state.moving={device,grabOffX,grabOffY,ox:device.position.x,oy:device.position.y,geo:device.geo};
+  state.mode='moving';
+  canvas.style.cursor='grabbing';
+}
+function updateMoving(sx,sy){
+  const m=state.moving;if(!m)return;
+  const c=screenToCanvas(sx,sy);
+  m.ox=snapToGrid(c.x-m.grabOffX);
+  m.oy=snapToGrid(c.y-m.grabOffY);
+  m.geo=makeGeo(m.device.type,m.ox,m.oy,m.device.name,m.device.params,m.device.orientation);
+}
+function finishMoving(){
+  const m=state.moving;if(!m)return;
+  const hit=checkInterference(m.geo,m.device);
+  if(hit){
+    logMsg(`Oops! Cannot move "${m.device.name}" — overlaps "${hit.name}". Restored.`);
+    // undo the pushUndo we did at start — the move failed so there's nothing to undo
+    state.undoStack.pop();
+  }else{
+    m.device.position={x:m.ox,y:m.oy};
+    m.device.geo=m.geo;
+    logMsg(`Moved "${m.device.name}" to (${m.ox}, ${m.oy})`);
+    setDirty();
+  }
+  state.moving=null;state.mode='idle';canvas.style.cursor='default';render();
+}
+function cancelMoving(){
+  if(!state.moving)return;
+  state.undoStack.pop(); // cancelled — discard the snapshot we pushed
+  state.moving=null;state.mode='idle';canvas.style.cursor='default';render();
+}
+
 // --- File I/O ---
 function serializeState(){
   return JSON.stringify({version:1,
@@ -963,11 +1107,12 @@ function serializeState(){
 }
 function deserializeState(json){
   let data;
-  try{data=JSON.parse(json);}catch(e){logMsg('Error: invalid JSON');return false;}
-  if(!data.version||!Array.isArray(data.devices)){logMsg('Error: invalid .ldraw format');return false;}
+  try{data=JSON.parse(json);}catch(e){logMsg('Oops! Invalid JSON');return false;}
+  if(!data.version||!Array.isArray(data.devices)){logMsg('Oops! Invalid .ldraw format');return false;}
   state.devices=[];
+  state.undoStack=[];
   for(const d of data.devices){
-    if(!SYMBOL_FACTORIES[d.type]){logMsg(`Warning: unknown type "${d.type}", skipped`);continue;}
+    if(!SYMBOL_FACTORIES[d.type]){logMsg(`Oops! Unknown type "${d.type}", skipped`);continue;}
     const params=d.params||{},orient=d.orientation||'right';
     const geo=makeGeo(d.type,d.x,d.y,d.name,params,orient);
     state.devices.push({type:d.type,name:d.name,params,position:{x:d.x,y:d.y},orientation:orient,geo});
@@ -990,6 +1135,7 @@ async function saveLdraw(){
         const w=await h.createWritable();
         await w.write(json);await w.close();
         logMsg(`Saved ${h.name}`);
+        clearDirty();
         console.log('Debug: save via existing handle succeeded');
         return;
       }catch(e){
@@ -1007,12 +1153,16 @@ async function saveLdraw(){
     const w=await newH.createWritable();await w.write(json);await w.close();
     state.writeHandle=newH;state.lastHandle=newH;state.lastName=newH.name;
     logMsg(`Saved ${newH.name}`);
+    clearDirty();
     console.log('Debug: save via picker succeeded, handle stored');
   }catch(e){
-    if(e.name!=='AbortError'){logMsg('Save error: '+e.message);console.log('Debug: save error',e);}
+    if(e.name!=='AbortError'){logMsg('Oops! Save error: '+e.message);console.log('Debug: save error',e);}
   }
 }
 async function loadLdraw(){
+  if(state.dirty){
+    if(!confirm('You have unsaved changes. Load anyway and discard them?'))return;
+  }
   try{
     const opts={types:[{description:'ldraw files',accept:{'application/json':['.ldraw']}}]};
     if(state.lastHandle) opts.startIn=state.lastHandle;
@@ -1026,18 +1176,23 @@ async function loadLdraw(){
       state.lastHandle=h;
       state.lastName=h.name;
       state.mode='idle';
+      clearDirty();
       logMsg(`Loaded ${h.name} — ${state.devices.length} device(s)`);
       console.log('Debug: load succeeded, writeHandle cleared, lastName='+h.name);
       render();
     }
-  }catch(e){if(e.name!=='AbortError')logMsg('Load error: '+e.message);}
+  }catch(e){if(e.name!=='AbortError')logMsg('Oops! Load error: '+e.message);}
 }
 function handleFileDrop(file){
-  if(!file.name.endsWith('.ldraw')){logMsg('Error: not a .ldraw file');return;}
+  if(!file.name.endsWith('.ldraw')){logMsg('Oops! Not a .ldraw file');return;}
+  if(state.dirty){
+    if(!confirm('You have unsaved changes. Load anyway and discard them?'))return;
+  }
   const r=new FileReader();
   r.onload=()=>{
     if(deserializeState(r.result)){
       state.writeHandle=null;state.lastName=file.name;state.mode='idle';
+      clearDirty();
       logMsg(`Loaded ${file.name} (dropped) — ${state.devices.length} device(s)`);
       render();
     }
@@ -1047,13 +1202,14 @@ function handleFileDrop(file){
 
 // --- Parameter editor ---
 let ppType=null;
+function _escAttr(s){return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function showParamEditor(type,sx,sy){
   const def=DEVICE_DEFS[type];
   ppType=type;
   const cfg=getSelCfg(type);
   const defaultName=cfg.nextName||previewNextName(type);
   let h=`<h3>${def.label}</h3>`;
-  h+=`<div class="pp-row"><label>Name</label><input type="text" id="pp-name" value="${defaultName}" style="width:100%;padding:2px 4px;font-size:13px;border:1px solid #aaa;border-radius:2px;"></div>`;
+  h+=`<div class="pp-row"><label>Name</label><input type="text" id="pp-name" value="${_escAttr(defaultName)}" style="width:100%;padding:2px 4px;font-size:13px;border:1px solid #aaa;border-radius:2px;"></div>`;
   if(def.orientations){
     h+=`<div class="pp-row"><label>Orientation</label><select id="pp-orient">`;
     for(const o of def.orientations)h+=`<option value="${o}"${o===cfg.orientation?' selected':''}>${o}</option>`;
@@ -1070,7 +1226,7 @@ function showParamEditor(type,sx,sy){
   if(py<0)py=10;
   paramPopup.style.left=px+'px';paramPopup.style.top=py+'px';
   const nInp=document.getElementById('pp-name');
-  if(nInp){nInp.addEventListener('change',applyPP);nInp.addEventListener('input',applyPP);}
+  if(nInp){nInp.addEventListener('change',applyPP);}
   const osel=document.getElementById('pp-orient');
   if(osel)osel.addEventListener('change',applyPP);
   for(const sp of def.paramSpecs){
@@ -1099,7 +1255,28 @@ function showCtxMenu(sx,sy){
   ctxMenu.style.left=sx+'px';ctxMenu.style.top=sy+'px';
   ctxMenu.style.display='block';
 }
-function hideCtxMenu(){ctxMenu.style.display='none';}
+function hideCtxMenu(){
+  ctxMenu.style.display='none';
+  ctxDeviceTarget=null;
+}
+function showCanvasCtxMenu(sx,sy){
+  const hasUndo=state.undoStack.length>0;
+  document.getElementById('ctx-undo').style.color=hasUndo?'':'#aaa';
+  document.getElementById('ctx-undo').style.cursor=hasUndo?'pointer':'default';
+  ctxCanvas.style.display='';
+  ctxDevice.style.display='none';
+  showCtxMenu(sx,sy);
+}
+function showDeviceCtxMenu(device,sx,sy){
+  ctxDeviceTarget=device;
+  document.getElementById('ctx-dev-title').textContent=device.type+' "'+device.name+'"';
+  document.getElementById('ctx-dev-name').value=device.name;
+  ctxCanvas.style.display='none';
+  ctxDevice.style.display='';
+  showCtxMenu(sx,sy);
+  // Focus the rename input after the menu is visible
+  setTimeout(()=>document.getElementById('ctx-dev-name').focus(),0);
+}
 
 function enterSelectionMode(){
   state.mode='selection';state.selectionLayout=null;state.selScrollY=0;hidePP();render();
@@ -1113,15 +1290,47 @@ document.getElementById('ctx-pan').addEventListener('click',()=>{
   const xs=prompt('Pan to X:','0');if(xs===null)return;
   const ys=prompt('Pan to Y:','0');if(ys===null)return;
   const x=parseInt(xs),y=parseInt(ys);
-  if(isNaN(x)||isNaN(y)){logMsg('Error: invalid coordinates');return;}
-  // panX/panY are offsets so canvas origin appears at canvas centre + pan.
-  // To put canvas point (x,y) at screen centre: panX=-x, panY=-y.
+  if(isNaN(x)||isNaN(y)){logMsg('Oops! Invalid coordinates');return;}
   state.panX=-x;state.panY=-y;render();
-  
 });
 document.getElementById('ctx-load').addEventListener('click',()=>{hideCtxMenu();loadLdraw();});
 document.getElementById('ctx-save').addEventListener('click',()=>{hideCtxMenu();saveLdraw();});
 document.getElementById('ctx-redraw').addEventListener('click',()=>{hideCtxMenu();render();});
+document.getElementById('ctx-undo').addEventListener('click',()=>{
+  hideCtxMenu();popUndo();
+});
+
+// Device context menu actions
+function doRename(){
+  const d=ctxDeviceTarget;if(!d)return;
+  const newName=document.getElementById('ctx-dev-name').value.trim();
+  if(!newName){logMsg('Oops! Name cannot be empty.');return;}
+  if(newName===d.name){hideCtxMenu();return;}
+  if(state.devices.some(x=>x.name===newName)){
+    logMsg(`Oops! Name "${newName}" already in use.`);return;
+  }
+  pushUndo();
+  d.name=newName;
+  // Recompute geo so the name label updates
+  d.geo=makeGeo(d.type,d.position.x,d.position.y,d.name,d.params,d.orientation);
+  logMsg(`Renamed to "${newName}".`);
+  setDirty();
+  hideCtxMenu();render();
+}
+document.getElementById('ctx-dev-rename-ok').addEventListener('click',doRename);
+document.getElementById('ctx-dev-name').addEventListener('keydown',e=>{
+  if(e.key==='Enter')doRename();
+  else if(e.key==='Escape'){hideCtxMenu();}
+  e.stopPropagation(); // don't let Escape propagate to the global keydown handler
+});
+document.getElementById('ctx-dev-delete').addEventListener('click',()=>{
+  const d=ctxDeviceTarget;if(!d)return;
+  pushUndo();
+  state.devices.splice(state.devices.indexOf(d),1);
+  logMsg(`Deleted "${d.name}".`);
+  setDirty();
+  hideCtxMenu();render();
+});
 
 // --- Events ---
 canvas.addEventListener('mousedown',e=>{
@@ -1133,7 +1342,14 @@ canvas.addEventListener('mousedown',e=>{
       const it=hitTestSelection(e.clientX,e.clientY);
       if(it)startPlacing(it.type,e.clientX,e.clientY);
     }else if(state.mode==='idle'){
-      startPanning(e.clientX,e.clientY);
+      // Phase 2: check for device hit before falling through to pan
+      const c=screenToCanvas(e.clientX,e.clientY);
+      const dev=hitTestDevice(c.x,c.y);
+      if(dev){
+        startMoving(dev,e.clientX,e.clientY);
+      }else{
+        startPanning(e.clientX,e.clientY);
+      }
     }
   }
 });
@@ -1141,12 +1357,14 @@ canvas.addEventListener('mousedown',e=>{
 canvas.addEventListener('mousemove',e=>{
   if(state.mode==='placing'){updatePlacing(e.clientX,e.clientY);render();}
   else if(state.mode==='panning')updatePanning(e.clientX,e.clientY);
+  else if(state.mode==='moving'){updateMoving(e.clientX,e.clientY);render();}
 });
 
 canvas.addEventListener('mouseup',e=>{
   if(e.button===0){
     if(state.mode==='placing')finishPlacing();
     else if(state.mode==='panning')finishPanning();
+    else if(state.mode==='moving')finishMoving();
   }
 });
 
@@ -1158,9 +1376,15 @@ canvas.addEventListener('contextmenu',e=>{
     // Right-click on background of selection view → exit
     state.mode='idle';render();return;
   }
-  // Normal / idle mode: show canvas context menu
+  // Normal / idle mode: hit-test for device first
   if(state.mode==='idle'){
-    showCtxMenu(e.clientX,e.clientY);
+    const c=screenToCanvas(e.clientX,e.clientY);
+    const dev=hitTestDevice(c.x,c.y);
+    if(dev){
+      showDeviceCtxMenu(dev,e.clientX,e.clientY);
+    }else{
+      showCanvasCtxMenu(e.clientX,e.clientY);
+    }
   }
 });
 
@@ -1178,6 +1402,11 @@ document.addEventListener('keydown',e=>{
       if(state.placing)state.nameCounters[state.placing.type]=Math.max(0,(state.nameCounters[state.placing.type]||1)-1);
       state.placing=null;state.mode='idle';render();
     }
+    else if(state.mode==='moving'){cancelMoving();}
+  }
+  if((e.ctrlKey||e.metaKey)&&e.key==='z'){
+    e.preventDefault();
+    popUndo();
   }
 });
 
@@ -1192,6 +1421,9 @@ canvas.addEventListener('wheel',e=>{
 canvas.addEventListener('dragover',e=>e.preventDefault());
 canvas.addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer.files.length)handleFileDrop(e.dataTransfer.files[0]);});
 window.addEventListener('resize',resizeCanvas);
+window.addEventListener('beforeunload',e=>{
+  if(state.dirty){e.preventDefault();e.returnValue='';}
+});
 
 // --- Init ---
 (function init(){

@@ -50,12 +50,12 @@ The ldraw program will:
 
 ## Development Status
 
-ldraw is built in phases. **Phase 1 is complete.**
+ldraw is built in phases. **Phases 1 and 2 are complete.**
 
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 1 | Static canvas, device placement, load/save `.ldraw` | **Complete** |
-| 2 | Device interactions: move, delete, undo, right-click context menu | Planned |
+| 2 | Device interactions: move, delete, undo, rename, dirty tracking | **Complete** |
 | 3 | Basic wires: create, extend, connect, floating-end indicator | Planned |
 | 4 | Wire topology: turns, branch points, tap, delete segment | Planned |
 | 5 | Named nets: cascade rename, orphan detection | Planned |
@@ -130,9 +130,14 @@ navigated to the last-used directory.
 
 * Chrome is the target browser.
 * No persistent storage between sessions; all state lives in memory.
-* Error, warning, and status messages appear in a scrollable log panel
-  fixed at the bottom of the window. Debug messages may also appear in
-  the browser console (`console.log`).
+* Error messages appear in the log panel prefixed with `"Oops! "` and are
+  accompanied by a brief audible beep. Informational messages (placement
+  confirmations, save/load results, undo) appear without a beep.
+* Debug messages may also appear in the browser console (`console.log`).
+* A **dirty flag** tracks whether the canvas has unsaved changes. When dirty,
+  an asterisk appears in the browser tab title. Loading a file while dirty
+  prompts for confirmation. Closing or navigating away while dirty triggers
+  the browser's native "leave page?" dialog.
 
 ---
 
@@ -164,9 +169,9 @@ pretty-printed JSON for human readability and diff-friendliness.
 function. They are multiples of `PIN_SPACE` (10). `wires` is present but
 empty in Phase 1; it will be populated in Phase 3.
 
-On load, auto-name counters are reconstructed by counting how many devices
-of each type exist, so that newly placed devices receive non-conflicting
-names regardless of what the loaded devices are named.
+On load, auto-name counters are reconstructed by scanning all device names
+for the highest numeric suffix of each type, so that newly placed devices
+receive non-conflicting names regardless of how loaded devices were named.
 
 ---
 
@@ -381,16 +386,19 @@ up to 50 lines.
 
 ### Canvas context menu
 
-Right-clicking on the idle canvas opens a context menu with:
+Right-clicking on the idle canvas (not on a device) opens a context menu with:
 
 * **Add device…** — enters the device selection view.
 * **Pan to x, y…** — prompts for canvas coordinates and scrolls the
   view so that point is centered on screen.
-* **Load…** — opens a file picker to load a `.ldraw` file.
+* **Load…** — opens a file picker to load a `.ldraw` file. If there are
+  unsaved changes, a confirmation dialog is shown first.
 * **Save…** — saves the current drawing. If a writable file handle
   already exists from a previous save, it is reused silently. Otherwise
   a save picker opens, pre-populated with the last-used filename and
   directory.
+* **Undo** — undoes the last state-changing operation (greyed out when
+  nothing is available to undo).
 * **Redraw** — repaints the canvas from internal state (diagnostic).
 
 Pressing **Escape** dismisses the context menu.
@@ -434,10 +442,12 @@ each device type for the duration of the session.
 ### Auto-naming
 
 When a device is placed without a custom name, it is assigned a name of
-the form `type` + `N`, where `N` is one more than the count of existing
-devices of that type on the canvas (e.g. `nand1`, `nand2`, `nand3`).
-This counter is recalculated from the actual device list on load, so it
-advances correctly regardless of what loaded devices are named.
+the form `type` + `N`, where `N` is one more than the highest numeric suffix
+currently in use among devices of that type (e.g. `nand1`, `nand2`, `nand3`).
+This counter is recalculated on load by scanning the actual device names, so
+it advances correctly past any manually assigned names. If a device is placed
+with a custom name that has a higher numeric suffix than the counter, the
+counter is immediately advanced past it so future auto-names do not collide.
 
 ### Interference detection
 
@@ -447,19 +457,32 @@ that has pins. This buffer is invisible but participates in interference
 checks, guaranteeing that there is always room for a wire segment to
 depart from any pin without immediately colliding with a neighbour.
 
-### Device context menu *(Phase 2)*
+### Device context menu
 
-Right-clicking a placed device will open a context menu allowing name
-editing, deletion, and wire creation. This is not yet implemented.
-Orientation and size parameters are not editable after placement.
+Right-clicking a placed device opens a context menu showing the device type
+and current name. The menu provides:
 
-### Device movement *(Phase 2)*
+* **Rename** — an inline text field pre-filled with the current name. Press
+  Enter or click OK to commit. Duplicate names and empty names are rejected.
+  Escape dismisses without change.
+* **Delete** — removes the device from the canvas. Undoable.
 
-Placed devices can be moved by left-click drag. Not yet implemented.
+### Device movement
 
-### Undo *(Phase 2)*
+Left-click drag on a placed device grabs it. The device disappears from its
+original position and a 50%-opacity ghost follows the cursor, snapping to the
+fine grid. Releasing the mouse button drops the device. If the new position
+interferes with another device, the move is rejected and the device is left
+in its original position. Escape cancels the move.
 
-Single-level undo (Ctrl-Z). Not yet implemented.
+### Undo
+
+An unlimited undo stack is maintained. Every operation that changes canvas
+state (place, move, delete, rename) pushes a snapshot before the change.
+Undo is invoked by **Ctrl+Z** (or Cmd+Z on Mac) at any time, or via the
+**Undo** item in the canvas context menu. The canvas context menu shows Undo
+greyed out when the stack is empty. A failed or cancelled move does not
+consume an undo slot.
 
 ### Wire creation and editing *(Phases 3–4)*
 
@@ -507,6 +530,7 @@ included — the SVG reflects the canvas exactly.
 
 Opens a file picker. After a successful load:
 * The canvas is cleared and repopulated from the file.
+* The undo stack is cleared (the loaded state becomes the new baseline).
 * The read-only file handle is remembered for directory navigation on
   the next open/save picker, and the filename is remembered as the
   suggested name for the next save.
@@ -550,3 +574,72 @@ New composite device types (box-style) need only:
 3. An entry in `DEVICE_DEFS` (label, defaultParams, orientations, paramSpecs).
 
 No other code changes are required.
+
+---
+
+## Phase 2 details: *(Complete)*
+
+### Move
+
+Left-click on the body of a device grabs it. The device disappears from its
+original position and a 50%-opacity ghost follows the cursor, snapping to
+the fine grid. Releasing the button drops the device. Interference is
+checked at the drop location; if blocked, the device is restored to its
+original position and a message is logged. Escape cancels the move.
+
+A failed or cancelled move does not push to the undo stack.
+
+#### For future when wires are added:
+
+Left clicking on a device also disconnects any input wire segments that
+might be attached, but does not delete them. Note that since those wire
+segments are floating, they will turn yellow.
+
+If the device has one or more outputs attached, an error dialog is displayed:
+```
+Cannot move device with a connected output. Delete output wires if you want to move the device.
+```
+
+### Delete
+
+Right-click on the body of the device brings up a context menu that includes
+a delete function. If selected, the device is deleted. Undoable.
+
+#### For future when wires are added:
+
+Deleting a device also disconnects any input wire segments that might be
+attached, but does not delete them. Note that since those wire segments are
+floating, they will turn yellow.
+
+If the device has one or more outputs attached, an error dialog is displayed:
+```
+Cannot delete device with a connected output. Delete output wires if you want to delete the device.
+```
+
+### Undo
+
+An unlimited undo stack is supported. Ctrl+Z (Cmd+Z on Mac) or the Undo
+item in the canvas context menu restores the previous state. All
+state-changing operations (place, move, delete, rename) are undoable.
+
+#### For future when wires are added:
+
+If the operation being undone resulted in wires being disconnected, the undo
+should restore the system state fully, including undoing the wire
+disconnections. Thus, state save points are tied to user operations, not
+individual element operations. For example, a device deletion might have
+multiple side-effect operations, like wire segment disconnections. Since the
+device deletion is seen by the user as a single operation, the system state
+should not be saved until the user-perceived operation is completed.
+
+### Device Editing
+
+Right-clicking a placed device opens a context menu allowing name editing.
+Orientation, number of inputs, and other attributes are not allowed to be
+edited after placement.
+
+## Review Comments
+
+1. screenToCanvas calls getBoundingClientRect() on every invocation.
+This is called on every mousemove during place/move. getBoundingClientRect() forces a layout reflow. For a full-screen canvas that never moves, the rect doesn't change between frames. Caching it (invalidated on resize) would be cleaner, though at this app's scale it's unlikely to be measurable.
+Decided not to act.
