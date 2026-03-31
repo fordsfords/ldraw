@@ -6,6 +6,7 @@ x.*
 *.tmp[0-9]
 tmp.*
 Zone.Identifier
+prev
 ~*
 *~
 *.bak
@@ -17,7 +18,7 @@ Zone.Identifier
 __pycache__
 
 # Executable
-a.out
+ldraw.html
 
 # Prerequisites
 *.d

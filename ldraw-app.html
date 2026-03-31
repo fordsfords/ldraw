@@ -1,0 +1,1974 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ldraw — logic circuit editor</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='4' fill='%23222'/><path d='M8 9 L8 23 L15 23 Q22 23 22 16 Q22 9 15 9 Z' fill='none' stroke='%23d0c090' stroke-width='2'/><circle cx='24' cy='16' r='2' fill='none' stroke='%23d0c090' stroke-width='1.8'/><line x1='0' y1='13' x2='8' y2='13' stroke='%23d0c090' stroke-width='2'/><line x1='0' y1='19' x2='8' y2='19' stroke='%23d0c090' stroke-width='2'/><line x1='26' y1='16' x2='32' y2='16' stroke='%23d0c090' stroke-width='2'/></svg>">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:#e8e6df; font-family:sans-serif; }
+
+#canvas { display:block; cursor:default; }
+#logPanel {
+  position:fixed; bottom:0; left:0; right:0; height:44px;
+  background:#141412; border-top:1px solid #555; overflow-y:auto;
+  font-family:monospace; font-size:11px; color:#9fba8f; padding:2px 6px;
+  z-index:5; user-select:text;
+}
+#paramPopup {
+  display:none; position:fixed; background:#fff; border:1px solid #666;
+  border-radius:4px; padding:10px; box-shadow:2px 2px 8px rgba(0,0,0,0.3);
+  font-size:13px; z-index:10; min-width:160px;
+}
+#paramPopup h3 { margin:0 0 8px; font-size:14px; }
+#paramPopup label { display:block; margin:4px 0 2px; font-size:12px; color:#444; }
+#paramPopup select, #paramPopup input[type=number] {
+  width:100%; padding:2px 4px; font-size:13px; border:1px solid #aaa; border-radius:2px;
+}
+#paramPopup .pp-row { margin-bottom:6px; }
+#paramPopup .pp-buttons { margin-top:8px; display:flex; gap:6px; justify-content:flex-end; }
+#paramPopup .pp-buttons button { padding:3px 10px; font-size:12px; cursor:pointer; }
+#modalDialog {
+  display:none; position:fixed; background:#fff; border:1px solid #666;
+  border-radius:4px; padding:10px; box-shadow:2px 2px 8px rgba(0,0,0,0.3);
+  font-size:13px; z-index:30; min-width:200px;
+}
+#modalDialog h3 { margin:0 0 8px; font-size:14px; }
+#modalDialog .md-row { margin-bottom:6px; }
+#modalDialog .md-buttons { margin-top:8px; display:flex; gap:6px; justify-content:flex-end; }
+#modalDialog .md-buttons button { padding:3px 10px; font-size:12px; cursor:pointer; }
+#ctxMenu {
+  display:none; position:fixed; background:#fff; border:1px solid #888;
+  border-radius:4px; padding:3px 0; box-shadow:2px 4px 12px rgba(0,0,0,0.25);
+  z-index:20; min-width:160px; font-size:13px; user-select:none;
+}
+.ctx-item { padding:5px 16px; cursor:pointer; color:#222; }
+.ctx-item:hover { background:#e4eeff; }
+.ctx-sep { height:1px; background:#ddd; margin:3px 0; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ctxMenu">
+  <!-- Canvas context menu items (shown when right-clicking blank canvas) -->
+  <div id="ctxCanvas">
+    <div class="ctx-item" id="ctx-add">Add device…</div>
+    <div class="ctx-item" id="ctx-pan">Pan to x, y…</div>
+    <div class="ctx-item" id="ctx-drawing-name">Rename drawing…</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-load">Load…</div>
+    <div class="ctx-item" id="ctx-save">Save…</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-undo">Undo</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-redraw">Redraw</div>
+  </div>
+  <!-- Device context menu items (shown when right-clicking a placed device) -->
+  <div id="ctxDevice" style="display:none">
+    <div class="ctx-item-label" id="ctx-dev-title" style="padding:4px 16px 6px;font-weight:bold;font-size:12px;color:#666;cursor:default;"></div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-dev-rename">Rename device…</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-dev-delete" style="color:#c00;">Delete device</div>
+  </div>
+  <!-- Pin / wire context menu (shown when right-clicking an output pin or floating wire end) -->
+  <div id="ctxPin" style="display:none">
+    <div class="ctx-item-label" id="ctx-pin-title" style="padding:4px 16px 6px;font-weight:bold;font-size:12px;color:#666;cursor:default;"></div>
+    <div class="ctx-sep"></div>
+    <div id="ctx-pin-newwire-row" style="position:relative;">
+      <div class="ctx-item" id="ctx-pin-newwire">New Wire ▸</div>
+      <div id="ctx-newwire-submenu" style="display:none;position:absolute;left:100%;top:0;background:#fff;border:1px solid #888;border-radius:4px;padding:3px 0;box-shadow:2px 4px 12px rgba(0,0,0,0.25);min-width:100px;font-size:13px;">
+        <div class="ctx-item ctx-nw-dir" data-dir="right">→ Right</div>
+        <div class="ctx-item ctx-nw-dir" data-dir="left">← Left</div>
+        <div class="ctx-item ctx-nw-dir" data-dir="up">↑ Up</div>
+        <div class="ctx-item ctx-nw-dir" data-dir="down">↓ Down</div>
+      </div>
+    </div>
+    <div class="ctx-item" id="ctx-pin-delwire" style="color:#c00;">Delete Wire</div>
+    <!-- Waypoint submenu (shown on floating wire end) -->
+    <div id="ctx-pin-wp-row" style="position:relative;">
+      <div class="ctx-item" id="ctx-pin-wp-trigger">Waypoint ▸</div>
+      <div id="ctx-wp-submenu" style="display:none;position:absolute;left:100%;top:0;background:#fff;border:1px solid #888;border-radius:4px;padding:3px 0;box-shadow:2px 4px 12px rgba(0,0,0,0.25);min-width:100px;font-size:13px;">
+        <div class="ctx-item ctx-wp-dir" data-dir="right">→ Right</div>
+        <div class="ctx-item ctx-wp-dir" data-dir="left">← Left</div>
+        <div class="ctx-item ctx-wp-dir" data-dir="up">↑ Up</div>
+        <div class="ctx-item ctx-wp-dir" data-dir="down">↓ Down</div>
+      </div>
+    </div>
+    <!-- Branch point submenu (shown on floating wire end) -->
+    <div id="ctx-pin-bp-row" style="position:relative;">
+      <div class="ctx-item" id="ctx-pin-bp-trigger">Branch point ▸</div>
+      <div id="ctx-bp-submenu" style="display:none;position:absolute;left:100%;top:0;background:#fff;border:1px solid #888;border-radius:4px;padding:3px 0;box-shadow:2px 4px 12px rgba(0,0,0,0.25);min-width:120px;font-size:13px;">
+        <div class="ctx-item ctx-bp-end-t" data-t="tr">├</div>
+        <div class="ctx-item ctx-bp-end-t" data-t="tl">┤</div>
+        <div class="ctx-item ctx-bp-end-t" data-t="tu">┴</div>
+        <div class="ctx-item ctx-bp-end-t" data-t="td">┬</div>
+      </div>
+    </div>
+  </div>
+  <!-- Waypoint context menu (shown when right-clicking a waypoint) -->
+  <div id="ctxWaypoint" style="display:none">
+    <div class="ctx-item-label" id="ctx-wp-title" style="padding:4px 16px 6px;font-weight:bold;font-size:12px;color:#666;cursor:default;"></div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-wp-delete" style="color:#c00;">Delete waypoint</div>
+  </div>
+  <!-- Branch point context menu (shown when right-clicking a branch point) -->
+  <div id="ctxBranchPoint" style="display:none">
+    <div class="ctx-item-label" id="ctx-bp-title" style="padding:4px 16px 6px;font-weight:bold;font-size:12px;color:#666;cursor:default;"></div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-bp-delete" style="color:#c00;">Delete branch point</div>
+  </div>
+  <!-- Segment body context menu (shown when right-clicking a wire segment body) -->
+  <div id="ctxSegment" style="display:none">
+    <div class="ctx-item-label" id="ctx-seg-title" style="padding:4px 16px 6px;font-weight:bold;font-size:12px;color:#666;cursor:default;"></div>
+    <div class="ctx-sep"></div>
+    <div id="ctx-seg-bp-row" style="position:relative;">
+      <div class="ctx-item" id="ctx-seg-bp-trigger">Branch point ▸</div>
+      <div id="ctx-seg-bp-submenu" style="display:none;position:absolute;left:100%;top:0;background:#fff;border:1px solid #888;border-radius:4px;padding:3px 0;box-shadow:2px 4px 12px rgba(0,0,0,0.25);min-width:120px;font-size:13px;">
+        <div class="ctx-item ctx-bp-mid-t" data-t="tr">├</div>
+        <div class="ctx-item ctx-bp-mid-t" data-t="tl">┤</div>
+        <div class="ctx-item ctx-bp-mid-t" data-t="tu">┴</div>
+        <div class="ctx-item ctx-bp-mid-t" data-t="td">┬</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="paramPopup"></div>
+<div id="modalDialog"></div>
+<div id="logPanel"></div>
+
+<script>
+/* @INCLUDE symbols.js */
+
+// =============================================================================
+// APPLICATION
+// =============================================================================
+
+const DEVICE_DEFS={
+  nand:     {label:'NAND',        defaultParams:{numInputs:2},orientations:['right','left','up','down'],
+             paramSpecs:[{key:'numInputs',label:'Inputs',min:1,max:16}]},
+  led:      {label:'LED',         defaultParams:{},orientations:['right','left','up','down'],paramSpecs:[]},
+  swtch:    {label:'Switch',      defaultParams:{},orientations:['right','left','up','down'],paramSpecs:[]},
+  gnd:      {label:'GND',         defaultParams:{},orientations:null,paramSpecs:[]},
+  vcc:      {label:'VCC',         defaultParams:{},orientations:null,paramSpecs:[]},
+  clk:      {label:'Clock',       defaultParams:{},orientations:['right','left'],paramSpecs:[]},
+  mem:      {label:'Memory',      defaultParams:{numAddr:2,numData:2},orientations:['right','left'],
+             paramSpecs:[{key:'numAddr',label:'Addr bits',min:1,max:16},{key:'numData',label:'Data bits',min:1,max:16}]},
+  srlatch:  {label:'SR Latch',    defaultParams:{},orientations:['right','left'],paramSpecs:[]},
+  dflipflop:{label:'D Flip-Flop', defaultParams:{},orientations:['right','left'],paramSpecs:[]},
+  reg:      {label:'Register',    defaultParams:{numBits:4},orientations:['right','left'],
+             paramSpecs:[{key:'numBits',label:'Bits',min:1,max:16}]},
+  panel:    {label:'Panel',       defaultParams:{numBits:4},orientations:['right','left'],
+             paramSpecs:[{key:'numBits',label:'Bits',min:1,max:16}]},
+  addbit:   {label:'1-bit Adder', defaultParams:{},orientations:['right','left'],paramSpecs:[]},
+  addword:  {label:'N-bit Adder', defaultParams:{numBits:4},orientations:['right','left'],
+             paramSpecs:[{key:'numBits',label:'Bits',min:1,max:16}]},
+  netsource:{label:'Net Source',  defaultParams:{},orientations:['right','left','up','down'],paramSpecs:[]},
+  netsink:  {label:'Net Sink',    defaultParams:{},orientations:['right','left','up','down'],paramSpecs:[]},
+};
+const DEVICE_TYPE_ORDER=Object.keys(DEVICE_DEFS);
+
+// --- State ---
+const state={
+  mode:'idle',
+  devices:[],
+  wires:[],           // Phase 3: wire objects
+  panX:0,panY:0,
+  nameCounters:{},
+  wireIdCounter:0,    // Phase 3: next wire ID number
+  segIdCounter:0,     // Phase 3: next segment ID number
+  wpIdCounter:0,      // Phase 4: next waypoint ID number
+  bpIdCounter:0,      // Phase 4b: next branch point ID number
+  selectionParams:{},
+  selectionLayout:null,
+  selScrollY:0,
+  placing:null,
+  moving:null,      // Phase 2: device being moved
+  extending:null,   // Phase 3: wire extending state
+  panAnchor:null,
+  writeHandle:null, // handle from showSaveFilePicker — always writable
+  lastHandle:null,  // any handle — used for startIn directory hint
+  lastName:null,    // suggested filename for next save picker
+  undoStack:[],     // Phase 2: deep-copied device snapshots (unlimited)
+  dirty:false,      // true when canvas has unsaved changes
+  drawingName:'unnamed', // Phase 4c: user-editable drawing name
+  drawingHash:0,         // Phase 4c: djb2 hash of serialized state
+  lastNetName:null,      // Phase 5: most recently placed/renamed net device name
+};
+
+// --- DOM refs ---
+const canvas   =document.getElementById('canvas');
+const ctx      =canvas.getContext('2d');
+
+const paramPopup=document.getElementById('paramPopup');
+const modalDialog=document.getElementById('modalDialog');
+const ctxMenu  =document.getElementById('ctxMenu');
+const ctxCanvas =document.getElementById('ctxCanvas');
+const ctxDevice =document.getElementById('ctxDevice');
+const ctxPin    =document.getElementById('ctxPin');
+const ctxWaypoint=document.getElementById('ctxWaypoint');
+const ctxBranchPoint=document.getElementById('ctxBranchPoint');
+const ctxSegment=document.getElementById('ctxSegment');
+const logPanel =document.getElementById('logPanel');
+
+let ctxDeviceTarget=null; // device object that was right-clicked
+let ctxPinTarget=null;    // {device, pinId, wire, segment, isFloatingEnd} for pin/wire context menu
+let ctxWpTarget=null;     // {wire, waypoint} for waypoint context menu
+let ctxBpTarget=null;     // {wire, branchPoint} for branch point context menu
+let ctxSegTarget=null;    // {wire, segment, snapX, snapY} for segment body context menu
+
+// --- Log panel (replaces console.log for user-visible messages) ---
+// --- Audio feedback ---
+let _audioCtx=null;
+function beep(){
+  try{
+    if(!_audioCtx)_audioCtx=new AudioContext();
+    const osc=_audioCtx.createOscillator();
+    const gain=_audioCtx.createGain();
+    osc.connect(gain);gain.connect(_audioCtx.destination);
+    osc.frequency.value=440;
+    gain.gain.setValueAtTime(0.18,_audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001,_audioCtx.currentTime+0.22);
+    osc.start();osc.stop(_audioCtx.currentTime+0.22);
+  }catch(e){/* silently ignore if audio unavailable */}
+}
+
+// --- Drawing hash (djb2) ---
+function djb2(str){
+  let h=5381;
+  for(let i=0;i<str.length;i++) h=((h<<5)+h+str.charCodeAt(i))>>>0;
+  return h;
+}
+function updateDrawingHash(){
+  state.drawingHash=djb2(serializeState());
+}
+
+// --- Dirty tracking ---
+function setDirty(){
+  state.dirty=true;
+  document.title='ldraw \u2014 logic circuit editor *';
+  updateDrawingHash();
+}
+function clearDirty(){
+  state.dirty=false;
+  document.title='ldraw \u2014 logic circuit editor';
+  updateDrawingHash();
+}
+
+function logMsg(msg){
+  const line=document.createElement('div');
+  line.textContent=msg;
+  logPanel.appendChild(line);
+  // Keep at most 50 lines
+  while(logPanel.children.length>50)logPanel.removeChild(logPanel.firstChild);
+  logPanel.scrollTop=logPanel.scrollHeight;
+  if(msg.startsWith('Oops!'))beep();
+}
+
+// --- Utilities ---
+function snapToGrid(v){return Math.round(v/PIN_SPACE)*PIN_SPACE;}
+function screenToCanvas(sx,sy){
+  const r=canvas.getBoundingClientRect();
+  return{x:sx-r.left-canvas.width/2-state.panX, y:sy-r.top-canvas.height/2-state.panY};
+}
+
+// --- Geometry helpers ---
+function makeGeo(type,ox,oy,name,params,orientation){
+  const f=SYMBOL_FACTORIES[type];return f?f(ox,oy,name,params,orientation):null;
+}
+function computeDeviceBounds(geo){
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  function e(x,y){if(x<minX)minX=x;if(y<minY)minY=y;if(x>maxX)maxX=x;if(y>maxY)maxY=y;}
+  for(const p of Object.values(geo.pins))e(p.x,p.y);
+  for(const s of geo.shapes){
+    if(s.type==='rect'){e(s.x,s.y);e(s.x+s.w,s.y+s.h);}
+    else if(s.type==='circle'){e(s.cx-s.r,s.cy-s.r);e(s.cx+s.r,s.cy+s.r);}
+    else if(s.type==='line'){e(s.x1,s.y1);e(s.x2,s.y2);}
+    else if(s.type==='polygon'){for(const p of s.points)e(p[0],p[1]);}
+    else if(s.type==='clockTriangle'){e(s.x-s.size*1.5,s.y-s.size);e(s.x+s.size*1.5,s.y+s.size*1.5);}
+    else if(s.type==='nandBody'){
+      e(s.topLeft[0],s.topLeft[1]);e(s.botLeft[0],s.botLeft[1]);
+      e(s.botArcStart[0],s.botArcStart[1]);e(s.topArcEnd[0],s.topArcEnd[1]);
+    }
+  }
+  return{minX,minY,maxX,maxY};
+}
+// --- Auto-naming ---
+function generateName(type){
+  if(!state.nameCounters[type])state.nameCounters[type]=0;
+  let name;
+  do { state.nameCounters[type]++; name=type+state.nameCounters[type]; }
+  while(state.devices.some(d=>d.name===name));
+  return name;
+}
+function recalcNameCounters(){
+  // For each type, the counter must be at least as large as the highest numeric
+  // suffix in use — whether that name was auto-generated or manually entered.
+  // Using only the count (as before) fails when a user manually names a device
+  // with a higher suffix (e.g. "nand3" as the first nand), leaving the counter
+  // too low and causing future auto-names to collide with manual ones.
+  state.nameCounters={};
+  for(const d of state.devices){
+    const cur=state.nameCounters[d.type]||0;
+    // Extract trailing integer from name, if any
+    const m=d.name.match(/^.*?(\d+)$/);
+    const suffix=m?parseInt(m[1],10):0;
+    state.nameCounters[d.type]=Math.max(cur,suffix);
+  }
+}
+// Phase 5: name availability check with net-aware collision rules.
+// netsource: must not collide with non-net devices or other netsources.
+// netsink:   must not collide with non-net devices.
+// all others: must not collide with any device (original behaviour).
+function isNameAvailable(name,forType){
+  for(const d of state.devices){
+    if(d.name!==name)continue;
+    if(forType==='netsource'){
+      if(d.type!=='netsink')return false; // collides with non-net or another netsource
+    }else if(forType==='netsink'){
+      if(d.type!=='netsource'&&d.type!=='netsink')return false; // collides with non-net
+    }else{
+      return false; // any collision
+    }
+  }
+  return true;
+}
+
+// --- Wire helpers (Phase 3) ---
+const PIN_HIT_RADIUS=PIN_SPACE; // 10px tolerance for pin hit testing
+
+// Output pin prefixes per device type. A pin whose ID starts with one of these
+// letters is an output; all others are inputs.
+const OUTPUT_PIN_PREFIXES={
+  nand:['o'],led:[],swtch:['o'],gnd:['o'],vcc:['o'],
+  clk:['q','Q'],mem:['o'],srlatch:['q','Q'],dflipflop:['q','Q'],
+  reg:['q'],panel:['o'],addbit:['s','o'],addword:['s','o'],
+  netsource:[],netsink:['o'],
+};
+function isOutputPin(deviceType,pinId){
+  const prefixes=OUTPUT_PIN_PREFIXES[deviceType];
+  if(!prefixes)return false;
+  return prefixes.some(p=>pinId.startsWith(p));
+}
+
+function hitTestPin(cx,cy){
+  // Returns {device, pinId, pin} if (cx,cy) is within tolerance of a pin tip, else null
+  let best=null,bestD=PIN_HIT_RADIUS;
+  for(const d of state.devices){
+    for(const [pid,pin] of Object.entries(d.geo.pins)){
+      const dx=cx-pin.x,dy=cy-pin.y,dist=Math.sqrt(dx*dx+dy*dy);
+      if(dist<bestD){bestD=dist;best={device:d,pinId:pid,pin};}
+    }
+  }
+  return best;
+}
+
+// Generic nearest-item hit test across all wires.
+// getItems(wire) returns the iterable, getXY(item) returns [x,y],
+// makeResult(wire,item) builds the return value.
+function hitTestWireItems(cx,cy,getItems,getXY,makeResult){
+  let best=null,bestD=PIN_HIT_RADIUS;
+  for(const w of state.wires){
+    for(const item of getItems(w)){
+      const [x,y]=getXY(item);
+      const dx=cx-x,dy=cy-y,dist=Math.sqrt(dx*dx+dy*dy);
+      if(dist<bestD){bestD=dist;best=makeResult(w,item);}
+    }
+  }
+  return best;
+}
+
+function hitTestWireEnd(cx,cy){
+  return hitTestWireItems(cx,cy,
+    w=>w.segments.filter(s=>s.downstream.type==='floating'),
+    s=>[s.endX,s.endY],
+    (w,s)=>({wire:w,segment:s}));
+}
+
+// Phase 5: check if a wire's source matches a specific device.
+// Uses position to disambiguate shared-name net devices.
+// Falls back to name+pin for old files without srcDevX/srcDevY.
+function wireSrcMatchesDev(w,device){
+  if(w.srcDev!==device.name||!device.geo.pins[w.srcPin])return false;
+  if(w.srcDevX!=null)return w.srcDevX===device.position.x&&w.srcDevY===device.position.y;
+  return true; // old wire without position — name+pin is sufficient
+}
+
+function findWireByOutput(device,pinId){
+  return state.wires.find(w=>w.srcPin===pinId&&wireSrcMatchesDev(w,device))||null;
+}
+
+function getWireOrigin(wire){
+  // Returns {x,y} of the wire's source output pin.
+  // Position check disambiguates net devices that share a name (Phase 5).
+  const dev=state.devices.find(d=>{
+    if(d.name!==wire.srcDev||!d.geo.pins[wire.srcPin])return false;
+    if(wire.srcDevX!=null)return d.position.x===wire.srcDevX&&d.position.y===wire.srcDevY;
+    return true;
+  });
+  if(!dev)return{x:0,y:0};
+  const pin=dev.geo.pins[wire.srcPin];
+  return{x:pin.x,y:pin.y};
+}
+function getSegStart(wire,seg){
+  // Returns {x,y} of the upstream end of a segment
+  if(seg.upstream.type==='pin') return getWireOrigin(wire);
+  if(seg.upstream.type==='waypoint'){
+    const wp=wire.waypoints.find(w=>w.id===seg.upstream.id);
+    if(wp)return{x:wp.x,y:wp.y};
+  }
+  if(seg.upstream.type==='branchpoint'){
+    const bp=wire.branchPoints.find(b=>b.id===seg.upstream.id);
+    if(bp)return{x:bp.x,y:bp.y};
+  }
+  return{x:0,y:0};
+}
+
+function createWire(device,pinId,direction){
+  const pin=device.geo.pins[pinId];
+  if(!pin)return;
+  state.wireIdCounter++;
+  state.segIdCounter++;
+  const dir=direction||pin.dir;
+  // Compute end position: one grid unit from pin in the chosen direction
+  let endX=pin.x,endY=pin.y;
+  if(dir==='right')endX+=PIN_SPACE;
+  else if(dir==='left')endX-=PIN_SPACE;
+  else if(dir==='down')endY+=PIN_SPACE;
+  else if(dir==='up')endY-=PIN_SPACE;
+  const wire={
+    id:'w'+state.wireIdCounter,
+    srcDev:device.name,
+    srcPin:pinId,
+    srcDevX:device.position.x, // Phase 5: disambiguates shared-name net devices
+    srcDevY:device.position.y,
+    segments:[{
+      id:'s'+state.segIdCounter,
+      orientation:dir, // immutable after creation; constrains extend axis (H segments lock Y, V lock X)
+      upstream:{type:'pin'},
+      downstream:{type:'floating'},
+      endX,endY,
+    }],
+    branchPoints:[],
+    waypoints:[],
+  };
+  state.wires.push(wire);
+  return wire;
+}
+
+function deleteWire(wire){
+  const idx=state.wires.indexOf(wire);
+  if(idx>=0)state.wires.splice(idx,1);
+}
+
+function parseIdNumber(id){
+  const m=id.match(/\d+$/);
+  return m?parseInt(m[0],10):0;
+}
+function recalcWireCounters(){
+  state.wireIdCounter=0;state.segIdCounter=0;state.wpIdCounter=0;state.bpIdCounter=0;
+  for(const w of state.wires){
+    state.wireIdCounter=Math.max(state.wireIdCounter,parseIdNumber(w.id));
+    for(const s of w.segments){
+      state.segIdCounter=Math.max(state.segIdCounter,parseIdNumber(s.id));
+    }
+    for(const wp of w.waypoints){
+      state.wpIdCounter=Math.max(state.wpIdCounter,parseIdNumber(wp.id));
+    }
+    for(const bp of w.branchPoints){
+      state.bpIdCounter=Math.max(state.bpIdCounter,parseIdNumber(bp.id));
+    }
+  }
+}
+
+// --- Wire extending (Phase 3b) ---
+const OPPOSITE_DIR={left:'right',right:'left',up:'down',down:'up'};
+
+function isHorizontal(dir){return dir==='left'||dir==='right';}
+
+// --- Phase 4a: Waypoint helpers ---
+function hitTestWaypoint(cx,cy){
+  return hitTestWireItems(cx,cy,
+    w=>w.waypoints,
+    wp=>[wp.x,wp.y],
+    (w,wp)=>({wire:w,waypoint:wp}));
+}
+
+function findSegByDownstreamWp(wire,wpId){
+  return wire.segments.find(s=>s.downstream.type==='waypoint'&&s.downstream.id===wpId)||null;
+}
+function findSegByUpstreamWp(wire,wpId){
+  return wire.segments.find(s=>s.upstream.type==='waypoint'&&s.upstream.id===wpId)||null;
+}
+
+// --- Phase 4b: T-junction definitions ---
+// Each T-junction type connects 3 directions at a point.
+const T_JUNCTIONS={
+  tr:{dirs:['up','down','right']},
+  tl:{dirs:['up','down','left']},
+  tu:{dirs:['left','right','up']},
+  td:{dirs:['left','right','down']},
+};
+
+// --- Phase 4b: Branch point helpers ---
+function findSegsByUpstreamBp(wire,bpId){
+  return wire.segments.filter(s=>s.upstream.type==='branchpoint'&&s.upstream.id===bpId);
+}
+function findSegByDownstreamBp(wire,bpId){
+  return wire.segments.find(s=>s.downstream.type==='branchpoint'&&s.downstream.id===bpId)||null;
+}
+
+function hitTestBranchPoint(cx,cy){
+  return hitTestWireItems(cx,cy,
+    w=>w.branchPoints,
+    bp=>[bp.x,bp.y],
+    (w,bp)=>({wire:w,branchPoint:bp}));
+}
+
+function hitTestSegmentBody(cx,cy){
+  // Detect click on a wire segment body (not at endpoints).
+  // Returns {wire, segment, snapX, snapY} or null.
+  const TOL=6; // perpendicular tolerance in pixels
+  let best=null,bestD=TOL;
+  for(const w of state.wires){
+    for(const seg of w.segments){
+      const start=getSegStart(w,seg);
+      const horiz=isHorizontal(seg.orientation);
+      let perpDist,alongPos,lo,hi,snapX,snapY;
+      if(horiz){
+        perpDist=Math.abs(cy-start.y);
+        alongPos=cx;
+        lo=Math.min(start.x,seg.endX);hi=Math.max(start.x,seg.endX);
+        snapX=snapToGrid(cx);snapY=start.y;
+        // Ensure snap is interior (not at endpoints)
+        if(snapX<=lo||snapX>=hi)continue;
+      }else{
+        perpDist=Math.abs(cx-start.x);
+        alongPos=cy;
+        lo=Math.min(start.y,seg.endY);hi=Math.max(start.y,seg.endY);
+        snapY=snapToGrid(cy);snapX=start.x;
+        if(snapY<=lo||snapY>=hi)continue;
+      }
+      // Must be within the segment extent (excluding endpoints by 1 grid unit)
+      if(alongPos<lo||alongPos>hi)continue;
+      if(perpDist<bestD){bestD=perpDist;best={wire:w,segment:seg,snapX,snapY};}
+    }
+  }
+  return best;
+}
+
+function addBranchPointAtEnd(wire,seg,tKey){
+  // Append a branch point at the floating end of seg.
+  // tKey is one of 'tr','tl','tu','td'.
+  console.assert(seg.downstream.type==='floating','addBranchPointAtEnd: segment must be floating');
+  const tj=T_JUNCTIONS[tKey];
+  const upDir=OPPOSITE_DIR[seg.orientation]; // direction upstream arrives from
+  console.assert(tj.dirs.includes(upDir),'addBranchPointAtEnd: invalid T for upstream direction');
+  const downDirs=tj.dirs.filter(d=>d!==upDir);
+  state.bpIdCounter++;
+  const bpId='bp'+state.bpIdCounter;
+  const bp={id:bpId,x:seg.endX,y:seg.endY};
+  wire.branchPoints.push(bp);
+  // Connect upstream segment's downstream to branch point
+  seg.downstream={type:'branchpoint',id:bpId};
+  // Create two new segments in the downstream directions
+  const newSegs=[];
+  for(const dir of downDirs){
+    state.segIdCounter++;
+    let endX=bp.x,endY=bp.y;
+    if(dir==='right')endX+=PIN_SPACE;
+    else if(dir==='left')endX-=PIN_SPACE;
+    else if(dir==='down')endY+=PIN_SPACE;
+    else if(dir==='up')endY-=PIN_SPACE;
+    const ns={
+      id:'s'+state.segIdCounter,
+      orientation:dir,
+      upstream:{type:'branchpoint',id:bpId},
+      downstream:{type:'floating'},
+      endX,endY,
+    };
+    wire.segments.push(ns);
+    newSegs.push(ns);
+  }
+  return{branchPoint:bp,segments:newSegs};
+}
+
+function addBranchPointMidSegment(wire,seg,snapX,snapY,tKey){
+  // Insert a branch point mid-segment, splitting it at (snapX,snapY).
+  const tj=T_JUNCTIONS[tKey];
+  const upDir=OPPOSITE_DIR[seg.orientation];
+  const contDir=seg.orientation;
+  console.assert(tj.dirs.includes(upDir)&&tj.dirs.includes(contDir),
+    'addBranchPointMidSegment: invalid T for segment orientation');
+  const branchDir=tj.dirs.find(d=>d!==upDir&&d!==contDir);
+  state.bpIdCounter++;
+  const bpId='bp'+state.bpIdCounter;
+  const bp={id:bpId,x:snapX,y:snapY};
+  wire.branchPoints.push(bp);
+  // Save the original downstream of the segment being split
+  const origDownstream=JSON.parse(JSON.stringify(seg.downstream));
+  const origEndX=seg.endX,origEndY=seg.endY;
+  // Truncate upstream segment to end at branch point
+  seg.downstream={type:'branchpoint',id:bpId};
+  seg.endX=snapX;seg.endY=snapY;
+  // Create continuation segment (keeps original orientation, goes to original end)
+  state.segIdCounter++;
+  const contSeg={
+    id:'s'+state.segIdCounter,
+    orientation:contDir,
+    upstream:{type:'branchpoint',id:bpId},
+    downstream:origDownstream,
+    endX:origEndX,endY:origEndY,
+  };
+  wire.segments.push(contSeg);
+  // If the original downstream was a waypoint, update the downstream segment's
+  // upstream reference — not needed since waypoints are referenced by ID in the
+  // downstream's upstream field which pointed to the OLD segment. We need to find
+  // any segment whose upstream references the old downstream waypoint/branchpoint
+  // and it should still work since the cont segment now owns that downstream.
+  // Actually: the segments downstream of the original's downstream still reference
+  // the waypoint/branchpoint by ID, and contSeg's downstream now points to it.
+  // No further fixup needed — the chain is: upSeg->bp->contSeg->origDownstream->...
+  // Create new branch segment
+  state.segIdCounter++;
+  let bEndX=snapX,bEndY=snapY;
+  if(branchDir==='right')bEndX+=PIN_SPACE;
+  else if(branchDir==='left')bEndX-=PIN_SPACE;
+  else if(branchDir==='down')bEndY+=PIN_SPACE;
+  else if(branchDir==='up')bEndY-=PIN_SPACE;
+  const branchSeg={
+    id:'s'+state.segIdCounter,
+    orientation:branchDir,
+    upstream:{type:'branchpoint',id:bpId},
+    downstream:{type:'floating'},
+    endX:bEndX,endY:bEndY,
+  };
+  wire.segments.push(branchSeg);
+  return{branchPoint:bp,contSegment:contSeg,branchSegment:branchSeg};
+}
+
+function deleteBranchPoint(wire,bpId){
+  // Delete branch point and everything downstream. Upstream segment becomes floating.
+  const{wpIds,bpIds,segIds}=collectDownstream(wire,'branchpoint',bpId);
+  // Find upstream segment (the one whose downstream connects to this branch point)
+  const upSeg=findSegByDownstreamBp(wire,bpId);
+  if(upSeg) upSeg.downstream={type:'floating'};
+  // Remove segments, waypoints, and branch points
+  wire.segments=wire.segments.filter(s=>!segIds.includes(s.id));
+  wire.waypoints=wire.waypoints.filter(wp=>!wpIds.includes(wp.id));
+  wire.branchPoints=wire.branchPoints.filter(bp=>!bpIds.includes(bp.id));
+}
+
+function addWaypoint(wire,seg,direction){
+  // Append a waypoint at the floating end of seg, create new segment in direction
+  console.assert(seg.downstream.type==='floating','addWaypoint: segment must be floating');
+  console.assert(direction!==OPPOSITE_DIR[seg.orientation],'addWaypoint: cannot go backwards');
+  state.wpIdCounter++;
+  state.segIdCounter++;
+  const wpId='wp'+state.wpIdCounter;
+  const wp={id:wpId,x:seg.endX,y:seg.endY};
+  wire.waypoints.push(wp);
+  // Connect upstream segment's downstream to waypoint
+  seg.downstream={type:'waypoint',id:wpId};
+  // Compute new segment end: one grid unit in chosen direction
+  let endX=wp.x,endY=wp.y;
+  if(direction==='right')endX+=PIN_SPACE;
+  else if(direction==='left')endX-=PIN_SPACE;
+  else if(direction==='down')endY+=PIN_SPACE;
+  else if(direction==='up')endY-=PIN_SPACE;
+  const newSeg={
+    id:'s'+state.segIdCounter,
+    orientation:direction,
+    upstream:{type:'waypoint',id:wpId},
+    downstream:{type:'floating'},
+    endX,endY,
+  };
+  wire.segments.push(newSeg);
+  return{waypoint:wp,segment:newSeg};
+}
+
+function collectDownstream(wire,nodeType,nodeId){
+  // Collect all waypoints, branch points, and segments downstream of a node.
+  // Handles the binary tree structure of branch points.
+  const wpIds=[],bpIds=[],segIds=[];
+  if(nodeType==='waypoint')wpIds.push(nodeId);
+  else if(nodeType==='branchpoint')bpIds.push(nodeId);
+  // Find all segments whose upstream is this node
+  const downSegs=wire.segments.filter(s=>s.upstream.type===nodeType&&s.upstream.id===nodeId);
+  for(const seg of downSegs){
+    segIds.push(seg.id);
+    if(seg.downstream.type==='waypoint'){
+      const sub=collectDownstream(wire,'waypoint',seg.downstream.id);
+      wpIds.push(...sub.wpIds);bpIds.push(...sub.bpIds);segIds.push(...sub.segIds);
+    }else if(seg.downstream.type==='branchpoint'){
+      const sub=collectDownstream(wire,'branchpoint',seg.downstream.id);
+      wpIds.push(...sub.wpIds);bpIds.push(...sub.bpIds);segIds.push(...sub.segIds);
+    }
+  }
+  return{wpIds,bpIds,segIds};
+}
+
+function deleteWaypoint(wire,wpId){
+  // Delete waypoint and everything downstream. Upstream segment becomes floating.
+  const{wpIds,bpIds,segIds}=collectDownstream(wire,'waypoint',wpId);
+  // Find upstream segment (the one whose downstream connects to this waypoint)
+  const upSeg=findSegByDownstreamWp(wire,wpId);
+  if(upSeg) upSeg.downstream={type:'floating'};
+  // Remove segments, waypoints, and branch points
+  wire.segments=wire.segments.filter(s=>!segIds.includes(s.id));
+  wire.waypoints=wire.waypoints.filter(wp=>!wpIds.includes(wp.id));
+  wire.branchPoints=wire.branchPoints.filter(bp=>!bpIds.includes(bp.id));
+}
+
+function findWireAtInput(deviceName,pinId){
+  // Find the wire/segment connected to a specific input pin
+  for(const w of state.wires){
+    for(const seg of w.segments){
+      if(seg.downstream.type==='pin'&&seg.downstream.dev===deviceName&&seg.downstream.pin===pinId)
+        return{wire:w,segment:seg};
+    }
+  }
+  return null;
+}
+
+// --- Phase 3c: Breaking connections helpers ---
+function deviceHasOutputWire(device){
+  // Phase 5: wireSrcMatchesDev disambiguates shared-name net devices.
+  return state.wires.some(w=>wireSrcMatchesDev(w,device));
+}
+
+function disconnectInputWires(device){
+  // Disconnect all segments connected to any input pin of this device.
+  // Pin check disambiguates net devices that share a name (Phase 5).
+  let count=0;
+  for(const w of state.wires){
+    for(const seg of w.segments){
+      if(seg.downstream.type==='pin'&&seg.downstream.dev===device.name&&device.geo.pins[seg.downstream.pin]){
+        seg.downstream={type:'floating'};
+        count++;
+      }
+    }
+  }
+  return count;
+}
+
+// Phase 5: rename a device and update all wire references.
+// Position + pin checks disambiguate shared-name net devices.
+function renameDevice(d,newName){
+  const oldName=d.name;
+  d.name=newName;
+  for(const w of state.wires){
+    if(w.srcDev===oldName&&d.geo.pins[w.srcPin]
+      &&(w.srcDevX==null||(w.srcDevX===d.position.x&&w.srcDevY===d.position.y))){
+      w.srcDev=newName;
+    }
+    for(const seg of w.segments){
+      if(seg.downstream.type==='pin'&&seg.downstream.dev===oldName&&d.geo.pins[seg.downstream.pin])
+        seg.downstream.dev=newName;
+    }
+  }
+  d.geo=makeGeo(d.type,d.position.x,d.position.y,d.name,d.params,d.orientation);
+}
+
+// Phase 5: compute foreground color for net devices.
+// netsink  → red   if no netsource shares its name.
+// netsource→ yellow if nothing is connected to its input pin.
+// Otherwise → normal foreground.
+function netDeviceColor(d){
+  if(d.type==='netsink'){
+    const hasSource=state.devices.some(s=>s.type==='netsource'&&s.name===d.name);
+    return hasSource?SYM_FG:NET_ORPHAN;
+  }
+  if(d.type==='netsource'){
+    return findWireAtInput(d.name,'i0')?SYM_FG:NET_NOSRC;
+  }
+  return SYM_FG;
+}
+
+function findConnectTarget(seg,wire,endX,endY){
+  // Check if (endX,endY) coincides with any input pin
+  for(const d of state.devices){
+    for(const [pid,pin] of Object.entries(d.geo.pins)){
+      if(isOutputPin(d.type,pid))continue; // only input pins
+      if(pin.x===endX&&pin.y===endY){
+        // Check not already connected (by any wire/segment — the extending
+        // segment was already disconnected in startExtending, so findWireAtInput
+        // only finds other connections, including branches of the same wire)
+        const existing=findWireAtInput(d.name,pid);
+        if(existing)continue;
+        return{device:d,pinId:pid,pin};
+      }
+    }
+  }
+  return null;
+}
+
+function checkSegmentInterference(wire,seg,endX,endY){
+  // Only check: collinear overlap with segments of OTHER wires.
+  // Two segments from different wires lying on top of each other are invisible
+  // and unselectable — the one interference we still prevent.
+  // Note: the overlap test uses <= / >= (not strict < / >), so segments that
+  // merely share a single endpoint are also rejected.  This is intentional:
+  // wires are independent signal paths with no electrical connection between
+  // them, so allowing two wires to touch at a point would be visually
+  // misleading (it would look like a junction that doesn't exist).
+  const start=getSegStart(wire,seg);
+  const horiz=isHorizontal(seg.orientation);
+  for(const w of state.wires){
+    if(w===wire)continue;
+    for(const os of w.segments){
+      const ws=getSegStart(w,os);
+      const osHoriz=isHorizontal(os.orientation);
+      if(horiz!==osHoriz)continue;
+      if(horiz){
+        if(start.y!==ws.y)continue;
+        const a1=Math.min(start.x,endX),a2=Math.max(start.x,endX);
+        const b1=Math.min(ws.x,os.endX),b2=Math.max(ws.x,os.endX);
+        if(a1<=b2&&a2>=b1)return'wire '+w.id;
+      }else{
+        if(start.x!==ws.x)continue;
+        const a1=Math.min(start.y,endY),a2=Math.max(start.y,endY);
+        const b1=Math.min(ws.y,os.endY),b2=Math.max(ws.y,os.endY);
+        if(a1<=b2&&a2>=b1)return'wire '+w.id;
+      }
+    }
+  }
+  return null;
+}
+
+function startExtending(wire,seg,sx,sy){
+  // MUTATION CONTRACT: startExtending modifies only seg.downstream (and
+  // during the drag, updateExtending modifies seg.endX/endY/downstream).
+  // cancelExtending and finishExtending-on-interference manually restore
+  // these three fields from origEndX/origEndY/origDownstream, then pop the
+  // undo snapshot.  If this function is ever changed to modify additional
+  // state, the manual restore in cancel/finish must be updated in lockstep.
+  // (Full popUndo is not used because its side effects — "Undo." log,
+  // unconditional setDirty, counter recalc — are wrong for cancel.)
+  pushUndo();
+  state.extending={
+    wire,seg,
+    origEndX:seg.endX,origEndY:seg.endY,
+    origDownstream:JSON.parse(JSON.stringify(seg.downstream)),
+    connectTarget:null,
+  };
+  // If was connected, disconnect visually
+  if(seg.downstream.type==='pin')seg.downstream={type:'floating'};
+  state.mode='extending';
+  canvas.style.cursor='grabbing';
+}
+
+function updateExtending(sx,sy){
+  const ext=state.extending;if(!ext)return;
+  const{wire,seg}=ext;
+  const c=screenToCanvas(sx,sy);
+  const start=getSegStart(wire,seg);
+  const horiz=isHorizontal(seg.orientation);
+  let newEnd;
+  if(horiz){
+    newEnd=snapToGrid(c.x);
+    // Enforce minimum 1 grid unit from pin
+    if(seg.orientation==='right')newEnd=Math.max(start.x+PIN_SPACE,newEnd);
+    else newEnd=Math.min(start.x-PIN_SPACE,newEnd);
+    seg.endX=newEnd;seg.endY=start.y;
+  }else{
+    newEnd=snapToGrid(c.y);
+    if(seg.orientation==='down')newEnd=Math.max(start.y+PIN_SPACE,newEnd);
+    else newEnd=Math.min(start.y-PIN_SPACE,newEnd);
+    seg.endY=newEnd;seg.endX=start.x;
+  }
+  // Check for connection target
+  ext.connectTarget=findConnectTarget(seg,wire,seg.endX,seg.endY);
+}
+
+function finishExtending(){
+  const ext=state.extending;if(!ext)return;
+  const{wire,seg,origEndX,origEndY,origDownstream,connectTarget}=ext;
+  // Check interference
+  const hit=checkSegmentInterference(wire,seg,seg.endX,seg.endY);
+  if(hit){
+    logMsg(`Oops! Wire ${wire.id} interferes with ${hit}. Restored.`);
+    // Snap back
+    seg.endX=origEndX;seg.endY=origEndY;
+    seg.downstream=origDownstream;
+    state.undoStack.pop();
+  }else if(connectTarget){
+    // Establish connection
+    seg.downstream={type:'pin',dev:connectTarget.device.name,pin:connectTarget.pinId};
+    logMsg(`Connected wire ${wire.id} to ${connectTarget.device.name}.${connectTarget.pinId}`);
+    setDirty();
+  }else{
+    // Valid floating drop
+    seg.downstream={type:'floating'};
+    setDirty();
+  }
+  state.extending=null;state.mode='idle';canvas.style.cursor='default';render();
+}
+
+function cancelExtending(){
+  const ext=state.extending;if(!ext)return;
+  // Restore original state
+  ext.seg.endX=ext.origEndX;ext.seg.endY=ext.origEndY;
+  ext.seg.downstream=ext.origDownstream;
+  state.undoStack.pop();
+  state.extending=null;state.mode='idle';canvas.style.cursor='default';render();
+}
+
+// --- Selection config ---
+function getSelCfg(type){
+  const def=DEVICE_DEFS[type],s=state.selectionParams[type];
+  return{
+    params:      s?{...def.defaultParams,...s.params}:{...def.defaultParams},
+    orientation: s?.orientation||(def.orientations?def.orientations[0]:'right'),
+    nextName:    s?.nextName||null,
+  };
+}
+function setSelCfg(type,params,orientation,nextName){
+  state.selectionParams[type]={params:{...params},orientation,nextName:nextName||null};
+  state.selectionLayout=null;
+}
+// Return the name that generateName(type) would produce without side-effects
+function previewNextName(type){
+  let n=(state.nameCounters[type]||0)+1;
+  let name;
+  do{name=type+n;n++;}while(state.devices.some(d=>d.name===name));
+  return name;
+}
+
+// --- Canvas sizing ---
+function resizeCanvas(){
+  canvas.width=window.innerWidth;
+  canvas.height=window.innerHeight-logPanel.offsetHeight;
+  state.selectionLayout=null;
+  render();
+}
+
+// --- Rendering ---
+function render(){
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(state.mode==='selection')renderSelectionView();
+  else renderNormalView();
+}
+function renderNormalView(){
+  const ox=canvas.width/2+state.panX,oy=canvas.height/2+state.panY;
+  ctx.setTransform(1,0,0,1,ox,oy);
+  renderGrid(ox,oy);
+  // Phase 3: draw wires first (behind devices)
+  renderWires();
+  const movingDevice=state.moving?state.moving.device:null;
+  for(const d of state.devices){
+    if(d===movingDevice)continue; // skip original position while dragging
+    // Phase 5: net devices use computed color (red/yellow/normal)
+    const fg=(d.type==='netsource'||d.type==='netsink')?netDeviceColor(d):SYM_FG;
+    renderDevice(ctx,d.type,d.geo,fg,SYM_MID,SYM_BG);
+  }
+  if(state.placing&&state.placing.geo){
+    ctx.save();ctx.globalAlpha=0.5;
+    renderDevice(ctx,state.placing.type,state.placing.geo,SYM_FG,SYM_MID,SYM_BG);
+    ctx.restore();
+  }
+  if(state.moving&&state.moving.geo){
+    ctx.save();ctx.globalAlpha=0.5;
+    renderDevice(ctx,state.moving.device.type,state.moving.geo,SYM_FG,SYM_MID,SYM_BG);
+    ctx.restore();
+  }
+  // Crosshair at extending segment's current floating end
+  if(state.extending){
+    const seg=state.extending.seg;
+    const L=-ox,T=-oy,R=canvas.width-ox,B=canvas.height-oy;
+    ctx.save();ctx.strokeStyle='rgba(0,0,0,0.12)';ctx.lineWidth=0.5;
+    ctx.beginPath();ctx.moveTo(seg.endX,T);ctx.lineTo(seg.endX,B);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(L,seg.endY);ctx.lineTo(R,seg.endY);ctx.stroke();
+    ctx.restore();
+  }
+  // Status bar: opaque strip at top of canvas
+  const STATUS_H=20;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,STATUS_H);
+  ctx.font='11px monospace';ctx.fillStyle='#000000';
+  ctx.textBaseline='middle';
+  // Left side: drawing name, dirty indicator, hash
+  const dirtyMark=state.dirty?' *':'';
+  const hashStr=state.drawingHash.toString(16).toUpperCase().padStart(8,'0');
+  ctx.textAlign='left';
+  ctx.fillText(`${state.drawingName}${dirtyMark}  #${hashStr}`,8,STATUS_H/2);
+  // Right side: pan coordinates
+  ctx.textAlign='right';
+  ctx.fillText(`pan ${-state.panX}, ${-state.panY}`,canvas.width-8,STATUS_H/2);
+}
+function renderWires(){
+  const ext=state.extending;
+  for(const w of state.wires){
+    for(const seg of w.segments){
+      const start=getSegStart(w,seg);
+      const isExtending=ext&&ext.wire===w&&ext.seg===seg;
+      let isFloating=seg.downstream.type==='floating';
+      let color;
+      if(isExtending&&ext.connectTarget)color='#222'; // connection preview: black
+      else if(isFloating)color='#cc9900'; // floating: yellow
+      else color='#222'; // connected: black
+      ctx.beginPath();
+      ctx.moveTo(start.x,start.y);
+      ctx.lineTo(seg.endX,seg.endY);
+      ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.stroke();
+    }
+    // Draw branch point dots (filled circles at T-junctions)
+    for(const bp of w.branchPoints){
+      ctx.beginPath();
+      ctx.arc(bp.x,bp.y,3,0,Math.PI*2);
+      ctx.fillStyle='#222';ctx.fill();
+    }
+  }
+}
+function renderGrid(ox,oy){
+  const L=-ox,T=-oy,R=canvas.width-ox,B=canvas.height-oy,maj=PIN_PITCH*5; // 100px major lines
+  ctx.fillStyle='rgba(0,0,0,0.07)';
+  const gx0=Math.ceil(L/PIN_SPACE)*PIN_SPACE,gy0=Math.ceil(T/PIN_SPACE)*PIN_SPACE;
+  for(let gx=gx0;gx<=R;gx+=PIN_SPACE)
+    for(let gy=gy0;gy<=B;gy+=PIN_SPACE)
+      ctx.fillRect(gx-0.5,gy-0.5,1,1);
+  ctx.strokeStyle='rgba(0,0,0,0.06)';ctx.lineWidth=0.5;
+  const mx0=Math.ceil(L/maj)*maj,my0=Math.ceil(T/maj)*maj;
+  for(let gx=mx0;gx<=R;gx+=maj){ctx.beginPath();ctx.moveTo(gx,T);ctx.lineTo(gx,B);ctx.stroke();}
+  for(let gy=my0;gy<=B;gy+=maj){ctx.beginPath();ctx.moveTo(L,gy);ctx.lineTo(R,gy);ctx.stroke();}
+  ctx.strokeStyle='rgba(0,0,0,0.18)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(-12,0);ctx.lineTo(12,0);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(0,-12);ctx.lineTo(0,12);ctx.stroke();
+}
+
+// --- Selection view ---
+function computeSelectionLayout(){
+  if(state.selectionLayout)return state.selectionLayout;
+  const PAD=30,LABEL_H=22,GAP=12,HDR=44;
+  const items=[];
+  for(const type of DEVICE_TYPE_ORDER){
+    const cfg=getSelCfg(type),geo=makeGeo(type,0,0,type,cfg.params,cfg.orientation);
+    const b=computeDeviceBounds(geo);
+    items.push({type,geo,bounds:b,w:b.maxX-b.minX,h:b.maxY-b.minY});
+  }
+  const maxW=Math.max(...items.map(i=>i.w)),maxH=Math.max(...items.map(i=>i.h));
+  const cellW=Math.max(120,maxW+PAD*2),cellH=Math.max(100,maxH+PAD*2)+LABEL_H;
+  const cols=Math.max(1,Math.floor((canvas.width-GAP)/(cellW+GAP)));
+  const gridW=cols*(cellW+GAP)-GAP,sx=(canvas.width-gridW)/2;
+  for(let i=0;i<items.length;i++){
+    const col=i%cols,row=Math.floor(i/cols),it=items[i];
+    it.cellX=sx+col*(cellW+GAP);it.cellY=HDR+row*(cellH+GAP);
+    it.cellW=cellW;it.cellH=cellH;
+    it.drawOffX=it.cellX+(cellW-it.w)/2-it.bounds.minX;
+    it.drawOffY=it.cellY+(cellH-LABEL_H-it.h)/2-it.bounds.minY;
+  }
+  const rows=Math.ceil(items.length/cols);
+  const totalGridH=HDR+rows*(cellH+GAP)+GAP;
+  state.selectionLayout={items,cellW,cellH,LABEL_H,HDR,totalGridH};
+  return state.selectionLayout;
+}
+function renderSelectionView(){
+  const layout=computeSelectionLayout();
+  const HDR=layout.HDR;
+  const maxScroll=Math.max(0,layout.totalGridH-canvas.height);
+  state.selScrollY=Math.max(0,Math.min(state.selScrollY,maxScroll));
+  const scroll=state.selScrollY;
+
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle='#e0ded7';ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // Clip scrollable content area below header
+  ctx.save();
+  ctx.beginPath();ctx.rect(0,HDR,canvas.width,canvas.height-HDR);ctx.clip();
+  ctx.translate(0,-scroll);
+
+  const hasClk=state.devices.some(d=>d.type==='clk');
+  const hasVcc=state.devices.some(d=>d.type==='vcc');
+  const hasGnd=state.devices.some(d=>d.type==='gnd');
+  for(const it of layout.items){
+    const grey=(it.type==='clk'&&hasClk)||(it.type==='vcc'&&hasVcc)||(it.type==='gnd'&&hasGnd);
+    ctx.fillStyle=grey?'#ccc':'#f5f4ef';ctx.strokeStyle='#aaa';ctx.lineWidth=1;
+    ctx.fillRect(it.cellX,it.cellY,it.cellW,it.cellH);ctx.strokeRect(it.cellX,it.cellY,it.cellW,it.cellH);
+    ctx.save();ctx.translate(it.drawOffX,it.drawOffY);
+    if(grey)ctx.globalAlpha=0.35;
+    renderDevice(ctx,it.type,it.geo,SYM_FG,SYM_MID,SYM_BG);
+    ctx.restore();
+    ctx.fillStyle=grey?'#999':'#333';ctx.font='12px sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(DEVICE_DEFS[it.type].label,it.cellX+it.cellW/2,it.cellY+it.cellH-layout.LABEL_H/2+2);
+  }
+  ctx.restore();  // end clip
+
+  // Pinned header (drawn after clip restore so it's always on top)
+  ctx.fillStyle='#d4d2cb';ctx.fillRect(0,0,canvas.width,HDR);
+  ctx.fillStyle='#333';ctx.font='bold 14px sans-serif';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('Select device — Left-click: grab   Right-click: configure   Scroll to see more',canvas.width/2,HDR/2);
+
+  // Scroll indicators
+  if(scroll>0){
+    ctx.fillStyle='rgba(0,0,0,0.15)';ctx.fillRect(0,HDR,canvas.width,6);
+  }
+  if(scroll<maxScroll){
+    ctx.fillStyle='rgba(0,0,0,0.15)';ctx.fillRect(0,canvas.height-6,canvas.width,6);
+  }
+}
+function hitTestSelection(sx,sy){
+  const layout=computeSelectionLayout();
+  const r=canvas.getBoundingClientRect();
+  if(sy-r.top<layout.HDR)return null;
+  const x=sx-r.left,y=sy-r.top+state.selScrollY;
+  for(const it of layout.items)if(x>=it.cellX&&x<=it.cellX+it.cellW&&y>=it.cellY&&y<=it.cellY+it.cellH)return it;
+  return null;
+}
+function hitTestDevice(cx,cy){
+  for(let i=state.devices.length-1;i>=0;i--){
+    const b=computeDeviceBounds(state.devices[i].geo);
+    if(cx>=b.minX&&cx<=b.maxX&&cy>=b.minY&&cy<=b.maxY)return state.devices[i];
+  }
+  return null;
+}
+
+// --- Placement ---
+function startPlacing(type,sx,sy){
+  if(type==='clk'&&state.devices.some(d=>d.type==='clk')){
+    logMsg('Oops! Only one clock device allowed');return;
+  }
+  if(type==='vcc'&&state.devices.some(d=>d.type==='vcc')){
+    logMsg('Oops! Only one VCC device allowed');return;
+  }
+  if(type==='gnd'&&state.devices.some(d=>d.type==='gnd')){
+    logMsg('Oops! Only one GND device allowed');return;
+  }
+  const cfg=getSelCfg(type);
+  let name;
+  if(cfg.nextName){
+    name=cfg.nextName;
+    if(!isNameAvailable(name,type)){
+      logMsg(`Oops! Name "${name}" already in use.`);return;
+    }
+    // Clear nextName so the next placement gets auto-generated
+    if(state.selectionParams[type])state.selectionParams[type].nextName=null;
+  }else if(type==='netsink'&&state.lastNetName&&isNameAvailable(state.lastNetName,'netsink')){
+    // Phase 5: default netsink name to most recently used net name
+    name=state.lastNetName;
+  }else{
+    name=generateName(type);
+  }
+  const ref=makeGeo(type,0,0,name,cfg.params,cfg.orientation);
+  const rb=computeDeviceBounds(ref);
+  state.placing={type,params:cfg.params,orientation:cfg.orientation,name,
+    cOx:(rb.minX+rb.maxX)/2,cOy:(rb.minY+rb.maxY)/2,geo:null,ox:0,oy:0};
+  state.mode='placing';
+  updatePlacing(sx,sy);render();
+}
+function updatePlacing(sx,sy){
+  const p=state.placing;if(!p)return;
+  const c=screenToCanvas(sx,sy);
+  p.ox=snapToGrid(c.x-p.cOx);p.oy=snapToGrid(c.y-p.cOy);
+  p.geo=makeGeo(p.type,p.ox,p.oy,p.name,p.params,p.orientation);
+}
+function finishPlacing(){
+  const p=state.placing;if(!p||!p.geo)return;
+  pushUndo();
+  state.devices.push({type:p.type,name:p.name,params:{...p.params},
+    position:{x:p.ox,y:p.oy},orientation:p.orientation,geo:p.geo});
+  // Phase 5: track most recently placed net device name
+  if(p.type==='netsource'||p.type==='netsink') state.lastNetName=p.name;
+  logMsg(`Placed ${p.type} "${p.name}" at (${p.ox}, ${p.oy})`);
+  setDirty();
+  state.placing=null;state.mode='idle';render();
+}
+
+// --- Panning ---
+function startPanning(sx,sy){
+  state.panAnchor={sx,sy,px:state.panX,py:state.panY};
+  state.mode='panning';canvas.style.cursor='grabbing';
+}
+function updatePanning(sx,sy){
+  const a=state.panAnchor;if(!a)return;
+  state.panX=a.px+(sx-a.sx);state.panY=a.py+(sy-a.sy);render();
+}
+function finishPanning(){
+  state.panAnchor=null;state.mode='idle';canvas.style.cursor='default';
+}
+
+// --- Undo ---
+function pushUndo(){
+  // Deep-copy devices and wires
+  const devSnap=state.devices.map(d=>({
+    type:d.type,name:d.name,
+    params:JSON.parse(JSON.stringify(d.params)),
+    position:{...d.position},
+    orientation:d.orientation,
+    geo:d.geo, // geo objects are immutable after creation — safe to share in undo snapshots
+  }));
+  const wireSnap=JSON.parse(JSON.stringify(state.wires));
+  state.undoStack.push({devices:devSnap,wires:wireSnap,drawingName:state.drawingName});
+}
+function popUndo(){
+  if(state.undoStack.length===0){logMsg('Nothing to undo.');return;}
+  hideCtxMenu();
+  const snap=state.undoStack.pop();
+  state.devices=snap.devices.map(d=>{
+    const geo=makeGeo(d.type,d.position.x,d.position.y,d.name,d.params,d.orientation);
+    return{type:d.type,name:d.name,params:d.params,position:d.position,orientation:d.orientation,geo};
+  });
+  state.wires=snap.wires;
+  state.drawingName=snap.drawingName;
+  recalcNameCounters();
+  recalcWireCounters();
+  setDirty();
+  render();
+  logMsg('Undo.');
+}
+
+// --- Move (Phase 2, updated Phase 3c) ---
+function startMoving(device,sx,sy){
+  // Phase 3c: block move if device has output wires
+  if(deviceHasOutputWire(device)){
+    logMsg(`Oops! Cannot move "${device.name}" — has a connected output. Delete output wires first.`);
+    return;
+  }
+  pushUndo();
+  // Compute offset from canvas origin of device to cursor so the ghost stays
+  // anchored under the grab point.
+  const c=screenToCanvas(sx,sy);
+  const grabOffX=c.x-device.position.x;
+  const grabOffY=c.y-device.position.y;
+  state.moving={device,grabOffX,grabOffY,ox:device.position.x,oy:device.position.y,origX:device.position.x,origY:device.position.y,geo:device.geo};
+  state.mode='moving';
+  canvas.style.cursor='grabbing';
+}
+function updateMoving(sx,sy){
+  const m=state.moving;if(!m)return;
+  const c=screenToCanvas(sx,sy);
+  m.ox=snapToGrid(c.x-m.grabOffX);
+  m.oy=snapToGrid(c.y-m.grabOffY);
+  m.geo=makeGeo(m.device.type,m.ox,m.oy,m.device.name,m.device.params,m.device.orientation);
+}
+function finishMoving(){
+  const m=state.moving;if(!m)return;
+  // Null move — dropped back at starting position — is a no-op
+  if(m.ox===m.origX&&m.oy===m.origY){
+    state.undoStack.pop();
+    state.moving=null;state.mode='idle';canvas.style.cursor='default';render();
+    return;
+  }
+  m.device.position={x:m.ox,y:m.oy};
+  m.device.geo=m.geo;
+  // Disconnect input wires on non-null move
+  const nDisc=disconnectInputWires(m.device);
+  if(nDisc>0) logMsg(`Moved "${m.device.name}" to (${m.ox}, ${m.oy}) — ${nDisc} input connection(s) broken.`);
+  else logMsg(`Moved "${m.device.name}" to (${m.ox}, ${m.oy})`);
+  setDirty();
+  state.moving=null;state.mode='idle';canvas.style.cursor='default';render();
+}
+function cancelMoving(){
+  if(!state.moving)return;
+  state.undoStack.pop(); // cancelled — discard the snapshot we pushed
+  state.moving=null;state.mode='idle';canvas.style.cursor='default';render();
+}
+
+// --- localStorage persistence (survives page reload) ---
+function persistLastName(){
+  try{localStorage.setItem('ldraw_lastName',state.lastName);}catch(e){}
+}
+function restoreLastName(){
+  try{const n=localStorage.getItem('ldraw_lastName');if(n)state.lastName=n;}catch(e){}
+}
+
+// --- File I/O ---
+function serializeState(){
+  return JSON.stringify({version:4,drawingName:state.drawingName,
+    devices:state.devices.map(d=>({type:d.type,name:d.name,params:d.params,
+      x:d.position.x,y:d.position.y,orientation:d.orientation})),
+    wires:state.wires.map(w=>({
+      id:w.id,srcDev:w.srcDev,srcPin:w.srcPin,
+      srcDevX:w.srcDevX,srcDevY:w.srcDevY,
+      segments:w.segments.map(s=>({
+        id:s.id,orientation:s.orientation,
+        upstream:s.upstream,downstream:s.downstream,
+        endX:s.endX,endY:s.endY,
+      })),
+      waypoints:w.waypoints,
+      branchPoints:w.branchPoints,
+    }))},null,2);
+}
+function deserializeState(json){
+  let data;
+  try{data=JSON.parse(json);}catch(e){logMsg('Oops! Invalid JSON');return false;}
+  if(!data.version||!Array.isArray(data.devices)){logMsg('Oops! Invalid .ldraw format');return false;}
+  if(data.version<2||data.version>4){logMsg(`Oops! Unsupported file version ${data.version} (expected 2–4)`);return false;}
+  state.drawingName=data.drawingName||'unnamed';
+  state.devices=[];
+  state.wires=[];
+  state.undoStack=[];
+  for(const d of data.devices){
+    if(!SYMBOL_FACTORIES[d.type]){logMsg(`Oops! Unknown type "${d.type}", skipped`);continue;}
+    const params=d.params||{},orient=d.orientation||'right';
+    const geo=makeGeo(d.type,d.x,d.y,d.name,params,orient);
+    state.devices.push({type:d.type,name:d.name,params,position:{x:d.x,y:d.y},orientation:orient,geo});
+  }
+  if(Array.isArray(data.wires)){
+    for(const w of data.wires){
+      state.wires.push({
+        id:w.id,srcDev:w.srcDev,srcPin:w.srcPin,
+        srcDevX:w.srcDevX??null,srcDevY:w.srcDevY??null,
+        segments:(w.segments||[]).map(s=>({
+          id:s.id,orientation:s.orientation,
+          upstream:s.upstream||{type:'pin'},
+          downstream:s.downstream||{type:'floating'},
+          endX:s.endX,endY:s.endY,
+        })),
+        waypoints:w.waypoints||[],
+        branchPoints:w.branchPoints||[],
+      });
+    }
+  }
+  recalcNameCounters();
+  recalcWireCounters();
+  return true;
+}
+async function saveLdraw(){
+  // In file:// origins, handles from showOpenFilePicker are read-only and
+  // requestPermission() throws.  We only reuse handles obtained from
+  // showSaveFilePicker (stored in state.writeHandle).
+  try{
+    const json=serializeState();
+    let h=state.writeHandle;
+    if(h){
+      try{
+        const w=await h.createWritable();
+        await w.write(json);await w.close();
+        logMsg(`Saved ${h.name}`);
+        clearDirty();render();
+        return;
+      }catch(e){
+        state.writeHandle=null;
+      }
+    }
+    const defaultName=state.drawingName+'.ldraw';
+    const opts={
+      suggestedName: state.lastName||defaultName,
+      types:[{description:'ldraw files',accept:{'application/json':['.ldraw']}}],
+    };
+    if(state.lastHandle) opts.startIn=state.lastHandle;
+    const newH=await window.showSaveFilePicker(opts);
+    const w=await newH.createWritable();await w.write(json);await w.close();
+    state.writeHandle=newH;state.lastHandle=newH;state.lastName=newH.name;
+    persistLastName();
+    logMsg(`Saved ${newH.name}`);
+    clearDirty();render();
+  }catch(e){
+    if(e.name!=='AbortError')logMsg('Oops! Save error: '+e.message);
+  }
+}
+async function loadLdraw(){
+  if(state.dirty){
+    if(!confirm('You have unsaved changes. Load anyway and discard them?'))return;
+  }
+  try{
+    const opts={types:[{description:'ldraw files',accept:{'application/json':['.ldraw']}}]};
+    if(state.lastHandle) opts.startIn=state.lastHandle;
+    const [h]=await window.showOpenFilePicker(opts);
+    const f=await h.getFile(),t=await f.text();
+    if(deserializeState(t)){
+      // h is read-only in file:// origins — do NOT store as writeHandle.
+      // Remember it only for directory + filename hints.
+      state.writeHandle=null;
+      state.lastHandle=h;
+      state.lastName=h.name;
+      persistLastName();
+      state.mode='idle';
+      clearDirty();
+      logMsg(`Loaded ${h.name} — ${state.devices.length} device(s), ${state.wires.length} wire(s)`);
+      render();
+    }
+  }catch(e){if(e.name!=='AbortError')logMsg('Oops! Load error: '+e.message);}
+}
+function handleFileDrop(file){
+  if(state.mode!=='idle'){logMsg('Oops! Cannot load while an operation is in progress.');return;}
+  if(!file.name.endsWith('.ldraw')){logMsg('Oops! Not a .ldraw file');return;}
+  if(state.dirty){
+    if(!confirm('You have unsaved changes. Load anyway and discard them?'))return;
+  }
+  const r=new FileReader();
+  r.onload=()=>{
+    if(deserializeState(r.result)){
+      state.writeHandle=null;state.lastName=file.name;persistLastName();state.mode='idle';
+      clearDirty();
+      logMsg(`Loaded ${file.name} (dropped) — ${state.devices.length} device(s), ${state.wires.length} wire(s)`);
+      render();
+    }
+  };
+  r.readAsText(file);
+}
+
+// --- Parameter editor ---
+let ppType=null;
+function _escAttr(s){return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function showParamEditor(type,sx,sy){
+  const def=DEVICE_DEFS[type];
+  ppType=type;
+  const cfg=getSelCfg(type);
+  const defaultName=cfg.nextName
+    ||(type==='netsink'&&state.lastNetName)||previewNextName(type);
+  let h=`<h3>${def.label}</h3>`;
+  h+=`<div class="pp-row"><label>Name</label><input type="text" id="pp-name" value="${_escAttr(defaultName)}" style="width:100%;padding:2px 4px;font-size:13px;border:1px solid #aaa;border-radius:2px;"></div>`;
+  if(def.orientations){
+    h+=`<div class="pp-row"><label>Orientation</label><select id="pp-orient">`;
+    for(const o of def.orientations)h+=`<option value="${o}"${o===cfg.orientation?' selected':''}>${o}</option>`;
+    h+=`</select></div>`;
+  }
+  for(const sp of def.paramSpecs){
+    const v=cfg.params[sp.key]??def.defaultParams[sp.key];
+    h+=`<div class="pp-row"><label>${sp.label}</label>
+      <input type="number" id="pp-${sp.key}" value="${v}" min="${sp.min}" max="${sp.max}"></div>`;
+  }
+  h+=`<div class="pp-buttons"><button id="pp-cancel">Cancel</button><button id="pp-ok">OK</button></div>`;
+  paramPopup.innerHTML=h;paramPopup.style.display='block';
+  let px=sx+10,py=sy-10;const pw=180;
+  if(px+pw>window.innerWidth)px=sx-pw-10;
+  if(py<0)py=10;
+  paramPopup.style.left=px+'px';paramPopup.style.top=py+'px';
+  document.getElementById('pp-ok').addEventListener('click',commitPP);
+  document.getElementById('pp-cancel').addEventListener('click',hidePP);
+  // Escape inside any input = Cancel
+  paramPopup.addEventListener('keydown',ppKeyHandler);
+}
+function ppKeyHandler(e){
+  if(e.key==='Escape'){hidePP();e.stopPropagation();}
+  else if(e.key==='Enter'){commitPP();e.stopPropagation();}
+}
+function commitPP(){
+  if(!ppType)return;
+  const def=DEVICE_DEFS[ppType];
+  const nInp=document.getElementById('pp-name');
+  const nextName=nInp&&nInp.value.trim()?nInp.value.trim():null;
+  const osel=document.getElementById('pp-orient');
+  const orient=osel?osel.value:(def.orientations?def.orientations[0]:'right');
+  const params={...def.defaultParams};
+  for(const sp of def.paramSpecs){
+    const inp=document.getElementById(`pp-${sp.key}`);
+    if(inp){let v=parseInt(inp.value);if(isNaN(v))v=def.defaultParams[sp.key];params[sp.key]=Math.max(sp.min,Math.min(sp.max,v));}
+  }
+  setSelCfg(ppType,params,orient,nextName);
+  hidePP();render();
+}
+function hidePP(){paramPopup.removeEventListener('keydown',ppKeyHandler);paramPopup.style.display='none';ppType=null;}
+
+// --- Context menu ---
+function showCtxMenu(sx,sy){
+  ctxMenu.style.left=sx+'px';ctxMenu.style.top=sy+'px';
+  ctxMenu.style.display='block';
+}
+const CTX_SECTIONS=[ctxCanvas,ctxDevice,ctxPin,ctxWaypoint,ctxBranchPoint,ctxSegment];
+function showCtxSection(section){
+  for(const s of CTX_SECTIONS)s.style.display=s===section?'':'none';
+}
+function hideCtxMenu(){
+  ctxMenu.style.display='none';
+  document.getElementById('ctx-wp-submenu').style.display='none';
+  document.getElementById('ctx-newwire-submenu').style.display='none';
+  document.getElementById('ctx-bp-submenu').style.display='none';
+  document.getElementById('ctx-seg-bp-submenu').style.display='none';
+  ctxDeviceTarget=null;
+  ctxPinTarget=null;
+  ctxWpTarget=null;
+  ctxBpTarget=null;
+  ctxSegTarget=null;
+}
+function showCanvasCtxMenu(sx,sy){
+  const hasUndo=state.undoStack.length>0;
+  document.getElementById('ctx-undo').style.color=hasUndo?'':'#aaa';
+  document.getElementById('ctx-undo').style.cursor=hasUndo?'pointer':'default';
+  showCtxSection(ctxCanvas);
+  showCtxMenu(sx,sy);
+}
+function showDeviceCtxMenu(device,sx,sy){
+  ctxDeviceTarget=device;
+  document.getElementById('ctx-dev-title').textContent=device.type+' "'+device.name+'"';
+  showCtxSection(ctxDevice);
+  showCtxMenu(sx,sy);
+}
+function showPinCtxMenu(device,pinId,wire,sx,sy,segment,isFloatingEnd){
+  ctxPinTarget={device,pinId,wire,segment:segment||null,isFloatingEnd:!!isFloatingEnd};
+  const hasWire=!!wire;
+  document.getElementById('ctx-pin-title').textContent=
+    device.name+'.'+pinId+(hasWire?' — wire '+wire.id:'');
+  // New wire submenu: only on output pin with no wire
+  document.getElementById('ctx-pin-newwire-row').style.display=hasWire?'none':'';
+  // Delete wire: only on output pin, not on floating end
+  document.getElementById('ctx-pin-delwire').style.display=(hasWire&&!isFloatingEnd)?'':'none';
+  // Waypoint submenu: only on floating end
+  const wpRow=document.getElementById('ctx-pin-wp-row');
+  wpRow.style.display=isFloatingEnd?'':'none';
+  // Branch point submenu: only on floating end
+  const bpRow=document.getElementById('ctx-pin-bp-row');
+  bpRow.style.display=isFloatingEnd?'':'none';
+  if(isFloatingEnd&&segment){
+    // Grey out the opposite direction for waypoints
+    const oppDir=OPPOSITE_DIR[segment.orientation];
+    for(const el of document.querySelectorAll('.ctx-wp-dir')){
+      const d=el.dataset.dir;
+      if(d===oppDir){
+        el.style.color='#bbb';el.style.cursor='default';el.style.pointerEvents='none';
+      }else{
+        el.style.color='';el.style.cursor='';el.style.pointerEvents='';
+      }
+    }
+    // Grey out T-junctions that don't include the upstream direction
+    const upDir=OPPOSITE_DIR[segment.orientation];
+    for(const el of document.querySelectorAll('.ctx-bp-end-t')){
+      const tj=T_JUNCTIONS[el.dataset.t];
+      if(!tj.dirs.includes(upDir)){
+        el.style.color='#bbb';el.style.cursor='default';el.style.pointerEvents='none';
+      }else{
+        el.style.color='';el.style.cursor='';el.style.pointerEvents='';
+      }
+    }
+  }
+  showCtxSection(ctxPin);
+  showCtxMenu(sx,sy);
+}
+
+function showWpCtxMenu(wire,waypoint,sx,sy){
+  ctxWpTarget={wire,waypoint};
+  document.getElementById('ctx-wp-title').textContent='Wire '+wire.id+' waypoint';
+  showCtxSection(ctxWaypoint);
+  showCtxMenu(sx,sy);
+}
+
+function showBpCtxMenu(wire,branchPoint,sx,sy){
+  ctxBpTarget={wire,branchPoint};
+  document.getElementById('ctx-bp-title').textContent='Wire '+wire.id+' branch point';
+  showCtxSection(ctxBranchPoint);
+  showCtxMenu(sx,sy);
+}
+
+function showSegCtxMenu(wire,segment,snapX,snapY,sx,sy){
+  ctxSegTarget={wire,segment,snapX,snapY};
+  document.getElementById('ctx-seg-title').textContent='Wire '+wire.id+' segment '+segment.id;
+  // Grey out T-junctions that don't include both upstream and continuation directions
+  const upDir=OPPOSITE_DIR[segment.orientation];
+  const contDir=segment.orientation;
+  for(const el of document.querySelectorAll('.ctx-bp-mid-t')){
+    const tj=T_JUNCTIONS[el.dataset.t];
+    if(!tj.dirs.includes(upDir)||!tj.dirs.includes(contDir)){
+      el.style.color='#bbb';el.style.cursor='default';el.style.pointerEvents='none';
+    }else{
+      el.style.color='';el.style.cursor='';el.style.pointerEvents='';
+    }
+  }
+  showCtxSection(ctxSegment);
+  showCtxMenu(sx,sy);
+}
+
+function enterSelectionMode(){
+  state.mode='selection';state.selectionLayout=null;state.selScrollY=0;hidePP();render();
+}
+
+// --- Modal dialog (durable popup for rename / drawing name) ---
+let _modalOnOk=null;
+function showModalDialog(title,label,value,onOk,sx,sy){
+  let h=`<h3>${title}</h3>`;
+  h+=`<div class="md-row"><label style="display:block;margin:4px 0 2px;font-size:12px;color:#444;">${label}</label>`;
+  h+=`<input type="text" id="md-input" value="${_escAttr(value)}" style="width:100%;padding:2px 4px;font-size:13px;border:1px solid #aaa;border-radius:2px;"></div>`;
+  h+=`<div class="md-buttons"><button id="md-cancel">Cancel</button><button id="md-ok">OK</button></div>`;
+  modalDialog.innerHTML=h;modalDialog.style.display='block';
+  let px=sx+10,py=sy-10;const pw=220;
+  if(px+pw>window.innerWidth)px=sx-pw-10;
+  if(py<0)py=10;
+  modalDialog.style.left=px+'px';modalDialog.style.top=py+'px';
+  _modalOnOk=onOk;
+  document.getElementById('md-ok').addEventListener('click',commitModal);
+  document.getElementById('md-cancel').addEventListener('click',hideModal);
+  modalDialog.addEventListener('keydown',modalKeyHandler);
+  setTimeout(()=>{const inp=document.getElementById('md-input');if(inp){inp.focus();inp.select();}},0);
+}
+function modalKeyHandler(e){
+  if(e.key==='Escape'){hideModal();e.stopPropagation();}
+  else if(e.key==='Enter'){commitModal();e.stopPropagation();}
+}
+function commitModal(){
+  const inp=document.getElementById('md-input');
+  const val=inp?inp.value.trim():'';
+  const cb=_modalOnOk;
+  hideModal();
+  if(cb)cb(val);
+}
+function hideModal(){
+  modalDialog.removeEventListener('keydown',modalKeyHandler);
+  modalDialog.style.display='none';_modalOnOk=null;
+}
+
+document.getElementById('ctx-add').addEventListener('click',()=>{
+  hideCtxMenu();enterSelectionMode();
+});
+document.getElementById('ctx-pan').addEventListener('click',()=>{
+  hideCtxMenu();
+  const xs=prompt('Pan to X:','0');if(xs===null)return;
+  const ys=prompt('Pan to Y:','0');if(ys===null)return;
+  const x=parseInt(xs),y=parseInt(ys);
+  if(isNaN(x)||isNaN(y)){logMsg('Oops! Invalid coordinates');return;}
+  state.panX=-x;state.panY=-y;render();
+});
+document.getElementById('ctx-drawing-name').addEventListener('click',()=>{
+  const sx=parseInt(ctxMenu.style.left),sy=parseInt(ctxMenu.style.top);
+  hideCtxMenu();
+  showModalDialog('Drawing name','Name',state.drawingName,(newName)=>{
+    if(!newName){logMsg('Oops! Drawing name cannot be empty.');return;}
+    if(newName===state.drawingName)return;
+    pushUndo();
+    state.drawingName=newName;
+    logMsg(`Drawing name set to "${newName}".`);
+    setDirty();render();
+  },sx,sy);
+});
+document.getElementById('ctx-load').addEventListener('click',()=>{hideCtxMenu();loadLdraw();});
+document.getElementById('ctx-save').addEventListener('click',()=>{hideCtxMenu();saveLdraw();});
+document.getElementById('ctx-redraw').addEventListener('click',()=>{hideCtxMenu();render();});
+document.getElementById('ctx-undo').addEventListener('click',()=>{
+  hideCtxMenu();popUndo();
+});
+
+// Device context menu actions
+document.getElementById('ctx-dev-rename').addEventListener('click',()=>{
+  const d=ctxDeviceTarget;if(!d)return;
+  const sx=parseInt(ctxMenu.style.left),sy=parseInt(ctxMenu.style.top);
+  hideCtxMenu();
+  showModalDialog('Rename device','New name',d.name,(newName)=>{
+    if(!newName){logMsg('Oops! Name cannot be empty.');return;}
+    if(newName===d.name)return;
+    if(!isNameAvailable(newName,d.type)){
+      logMsg(`Oops! Name "${newName}" already in use.`);return;
+    }
+    pushUndo();
+    const oldName=d.name;
+    renameDevice(d,newName);
+    // Phase 5: cascade netsource rename to all netsinks sharing the old name
+    if(d.type==='netsource'){
+      let count=0;
+      for(const sink of state.devices){
+        if(sink.type==='netsink'&&sink.name===oldName){
+          renameDevice(sink,newName);
+          count++;
+        }
+      }
+      if(count>0) logMsg(`Renamed to "${newName}" (${count} net sink(s) updated).`);
+      else logMsg(`Renamed to "${newName}".`);
+    }else{
+      logMsg(`Renamed to "${newName}".`);
+    }
+    if(d.type==='netsource'||d.type==='netsink') state.lastNetName=newName;
+    setDirty();render();
+  },sx,sy);
+});
+document.getElementById('ctx-dev-delete').addEventListener('click',()=>{
+  const d=ctxDeviceTarget;if(!d)return;
+  // Phase 3c: block delete if device has output wires
+  if(deviceHasOutputWire(d)){
+    logMsg(`Oops! Cannot delete "${d.name}" — has a connected output. Delete output wires first.`);
+    hideCtxMenu();return;
+  }
+  pushUndo();
+  // Phase 3c: disconnect input wires before removing device
+  const nDisc=disconnectInputWires(d);
+  state.devices.splice(state.devices.indexOf(d),1);
+  if(nDisc>0) logMsg(`Deleted "${d.name}" — ${nDisc} input connection(s) broken.`);
+  else logMsg(`Deleted "${d.name}".`);
+  setDirty();
+  hideCtxMenu();render();
+});
+
+// Pin / wire context menu actions
+// New Wire submenu: show on hover
+document.getElementById('ctx-pin-newwire').addEventListener('mouseenter',()=>{
+  document.getElementById('ctx-newwire-submenu').style.display='block';
+});
+document.getElementById('ctx-pin-newwire-row').addEventListener('mouseleave',()=>{
+  document.getElementById('ctx-newwire-submenu').style.display='none';
+});
+for(const el of document.querySelectorAll('.ctx-nw-dir')){
+  el.addEventListener('click',()=>{
+    const t=ctxPinTarget;if(!t)return;
+    const dir=el.dataset.dir;
+    pushUndo();
+    const w=createWire(t.device,t.pinId,dir);
+    logMsg(`Created wire ${w.id} on ${t.device.name}.${t.pinId} heading ${dir}`);
+    setDirty();
+    hideCtxMenu();render();
+  });
+}
+document.getElementById('ctx-pin-delwire').addEventListener('click',()=>{
+  const t=ctxPinTarget;if(!t||!t.wire)return;
+  pushUndo();
+  deleteWire(t.wire);
+  logMsg(`Deleted wire ${t.wire.id}`);
+  setDirty();
+  hideCtxMenu();render();
+});
+
+// Waypoint submenu: show on hover
+document.getElementById('ctx-pin-wp-trigger').addEventListener('mouseenter',()=>{
+  document.getElementById('ctx-wp-submenu').style.display='block';
+});
+document.getElementById('ctx-pin-wp-row').addEventListener('mouseleave',()=>{
+  document.getElementById('ctx-wp-submenu').style.display='none';
+});
+
+// Waypoint direction click
+for(const el of document.querySelectorAll('.ctx-wp-dir')){
+  el.addEventListener('click',()=>{
+    const t=ctxPinTarget;if(!t||!t.wire||!t.segment)return;
+    const dir=el.dataset.dir;
+    pushUndo();
+    const result=addWaypoint(t.wire,t.segment,dir);
+    logMsg(`Added waypoint on wire ${t.wire.id}, new segment ${result.segment.id} heading ${dir}`);
+    setDirty();
+    hideCtxMenu();render();
+  });
+}
+
+// Waypoint delete
+document.getElementById('ctx-wp-delete').addEventListener('click',()=>{
+  const t=ctxWpTarget;if(!t)return;
+  pushUndo();
+  // Count disconnections
+  const{segIds}=collectDownstream(t.wire,'waypoint',t.waypoint.id);
+  let nDisc=0;
+  for(const seg of t.wire.segments){
+    if(segIds.includes(seg.id)&&seg.downstream.type==='pin')nDisc++;
+  }
+  deleteWaypoint(t.wire,t.waypoint.id);
+  let msg=`Deleted waypoint on wire ${t.wire.id}`;
+  if(nDisc>0)msg+=` — ${nDisc} connection(s) broken`;
+  logMsg(msg);
+  setDirty();
+  hideCtxMenu();render();
+});
+
+// --- Phase 4b: Branch point event handlers ---
+
+// Branch point submenu on floating end: show on hover
+document.getElementById('ctx-pin-bp-trigger').addEventListener('mouseenter',()=>{
+  document.getElementById('ctx-bp-submenu').style.display='block';
+});
+document.getElementById('ctx-pin-bp-row').addEventListener('mouseleave',()=>{
+  document.getElementById('ctx-bp-submenu').style.display='none';
+});
+
+// Branch point at floating end: T-junction click
+for(const el of document.querySelectorAll('.ctx-bp-end-t')){
+  el.addEventListener('click',()=>{
+    const t=ctxPinTarget;if(!t||!t.wire||!t.segment)return;
+    const tKey=el.dataset.t;
+    pushUndo();
+    const result=addBranchPointAtEnd(t.wire,t.segment,tKey);
+    logMsg(`Added branch point ${result.branchPoint.id} on wire ${t.wire.id}, segments ${result.segments.map(s=>s.id).join(', ')}`);
+    setDirty();
+    hideCtxMenu();render();
+  });
+}
+
+// Branch point delete
+document.getElementById('ctx-bp-delete').addEventListener('click',()=>{
+  const t=ctxBpTarget;if(!t)return;
+  pushUndo();
+  // Count disconnections
+  const{segIds}=collectDownstream(t.wire,'branchpoint',t.branchPoint.id);
+  let nDisc=0;
+  for(const seg of t.wire.segments){
+    if(segIds.includes(seg.id)&&seg.downstream.type==='pin')nDisc++;
+  }
+  deleteBranchPoint(t.wire,t.branchPoint.id);
+  let msg=`Deleted branch point on wire ${t.wire.id}`;
+  if(nDisc>0)msg+=` — ${nDisc} connection(s) broken`;
+  logMsg(msg);
+  setDirty();
+  hideCtxMenu();render();
+});
+
+// Segment body branch point submenu: show on hover
+document.getElementById('ctx-seg-bp-trigger').addEventListener('mouseenter',()=>{
+  document.getElementById('ctx-seg-bp-submenu').style.display='block';
+});
+document.getElementById('ctx-seg-bp-row').addEventListener('mouseleave',()=>{
+  document.getElementById('ctx-seg-bp-submenu').style.display='none';
+});
+
+// Segment body branch point: T-junction click
+for(const el of document.querySelectorAll('.ctx-bp-mid-t')){
+  el.addEventListener('click',()=>{
+    const t=ctxSegTarget;if(!t)return;
+    const tKey=el.dataset.t;
+    pushUndo();
+    const result=addBranchPointMidSegment(t.wire,t.segment,t.snapX,t.snapY,tKey);
+    logMsg(`Inserted branch point ${result.branchPoint.id} on wire ${t.wire.id}, branch segment ${result.branchSegment.id}`);
+    setDirty();
+    hideCtxMenu();render();
+  });
+}
+
+// --- Events ---
+canvas.addEventListener('mousedown',e=>{
+  // Modal dialog and param popup are durable — not dismissed by clicking outside
+  if(modalDialog.style.display==='block')return; // block canvas interaction while modal is open
+  if(paramPopup.style.display==='block'&&!paramPopup.contains(e.target))return; // block canvas interaction while param popup is open
+  if(ctxMenu.style.display!=='none')hideCtxMenu();
+
+  if(e.button===0){
+    if(state.mode==='selection'){
+      const it=hitTestSelection(e.clientX,e.clientY);
+      if(it)startPlacing(it.type,e.clientX,e.clientY);
+    }else if(state.mode==='idle'){
+      const c=screenToCanvas(e.clientX,e.clientY);
+      // Phase 3b: check for floating wire end (grab to extend)
+      const wEnd=hitTestWireEnd(c.x,c.y);
+      if(wEnd){
+        startExtending(wEnd.wire,wEnd.segment,e.clientX,e.clientY);
+        return;
+      }
+      // Phase 3b: check for connected input pin (grab to disconnect and extend)
+      const pinHit=hitTestPin(c.x,c.y);
+      if(pinHit&&!isOutputPin(pinHit.device.type,pinHit.pinId)){
+        const conn=findWireAtInput(pinHit.device.name,pinHit.pinId);
+        if(conn){
+          startExtending(conn.wire,conn.segment,e.clientX,e.clientY);
+          return;
+        }
+      }
+      // Phase 2: check for device hit before falling through to pan
+      const dev=hitTestDevice(c.x,c.y);
+      if(dev){
+        startMoving(dev,e.clientX,e.clientY);
+      }else{
+        startPanning(e.clientX,e.clientY);
+      }
+    }
+  }
+});
+
+canvas.addEventListener('mousemove',e=>{
+  if(state.mode==='placing'){updatePlacing(e.clientX,e.clientY);render();}
+  else if(state.mode==='panning')updatePanning(e.clientX,e.clientY);
+  else if(state.mode==='moving'){updateMoving(e.clientX,e.clientY);render();}
+  else if(state.mode==='extending'){updateExtending(e.clientX,e.clientY);render();}
+});
+
+canvas.addEventListener('mouseup',e=>{
+  if(e.button===0){
+    if(state.mode==='placing')finishPlacing();
+    else if(state.mode==='panning')finishPanning();
+    else if(state.mode==='moving')finishMoving();
+    else if(state.mode==='extending')finishExtending();
+  }
+});
+
+canvas.addEventListener('contextmenu',e=>{
+  e.preventDefault();
+  // Block right-click while modal dialog or param popup is open
+  if(modalDialog.style.display==='block')return;
+  if(paramPopup.style.display==='block')return;
+  if(state.mode==='selection'){
+    const it=hitTestSelection(e.clientX,e.clientY);
+    if(it){showParamEditor(it.type,e.clientX,e.clientY);return;}
+    // Right-click on background of selection view → exit
+    state.mode='idle';render();return;
+  }
+  // Normal / idle mode: check branch point, waypoint, pin, wire end, device, segment body, canvas
+  if(state.mode==='idle'){
+    const c=screenToCanvas(e.clientX,e.clientY);
+    // Check branch point first
+    const bpHit=hitTestBranchPoint(c.x,c.y);
+    if(bpHit){
+      showBpCtxMenu(bpHit.wire,bpHit.branchPoint,e.clientX,e.clientY);
+      return;
+    }
+    // Check waypoint
+    const wpHit=hitTestWaypoint(c.x,c.y);
+    if(wpHit){
+      showWpCtxMenu(wpHit.wire,wpHit.waypoint,e.clientX,e.clientY);
+      return;
+    }
+    // Check floating wire end
+    const wEnd=hitTestWireEnd(c.x,c.y);
+    if(wEnd){
+      const ww=wEnd.wire;
+      const dev=state.devices.find(d=>d.name===ww.srcDev&&d.geo.pins[ww.srcPin]
+        &&(ww.srcDevX==null||(d.position.x===ww.srcDevX&&d.position.y===ww.srcDevY)));
+      if(dev){
+        showPinCtxMenu(dev,wEnd.wire.srcPin,wEnd.wire,e.clientX,e.clientY,wEnd.segment,true);
+        return;
+      }
+    }
+    // Check output pin (for new wire or existing wire management)
+    const pinHit=hitTestPin(c.x,c.y);
+    if(pinHit&&isOutputPin(pinHit.device.type,pinHit.pinId)){
+      const wire=findWireByOutput(pinHit.device,pinHit.pinId);
+      showPinCtxMenu(pinHit.device,pinHit.pinId,wire,e.clientX,e.clientY,null,false);
+      return;
+    }
+    const dev=hitTestDevice(c.x,c.y);
+    if(dev){
+      showDeviceCtxMenu(dev,e.clientX,e.clientY);
+      return;
+    }
+    // Check segment body (for mid-segment branch point insertion)
+    const segHit=hitTestSegmentBody(c.x,c.y);
+    if(segHit){
+      showSegCtxMenu(segHit.wire,segHit.segment,segHit.snapX,segHit.snapY,e.clientX,e.clientY);
+      return;
+    }
+    showCanvasCtxMenu(e.clientX,e.clientY);
+  }
+});
+
+document.addEventListener('mousedown',e=>{
+  // Modal dialog and param popup are durable — not dismissed by clicking outside
+  if(ctxMenu.style.display!=='none'&&!ctxMenu.contains(e.target))hideCtxMenu();
+});
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    if(modalDialog.style.display==='block'){hideModal();return;}
+    if(paramPopup.style.display==='block'){hidePP();return;}
+    if(ctxMenu.style.display!=='none'){hideCtxMenu();return;}
+    if(state.mode==='selection'){state.mode='idle';hidePP();render();}
+    else if(state.mode==='placing'){
+      state.placing=null;state.mode='idle';render();
+    }
+    else if(state.mode==='moving'){cancelMoving();}
+    else if(state.mode==='extending'){cancelExtending();}
+  }
+  if((e.ctrlKey||e.metaKey)&&e.key==='z'){
+    e.preventDefault();
+    if(state.mode==='idle')popUndo();
+  }
+});
+
+canvas.addEventListener('wheel',e=>{
+  if(state.mode==='selection'){
+    e.preventDefault();
+    state.selScrollY+=e.deltaY;
+    render();
+  }
+},{passive:false});
+
+canvas.addEventListener('dragover',e=>e.preventDefault());
+canvas.addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer.files.length)handleFileDrop(e.dataTransfer.files[0]);});
+window.addEventListener('resize',resizeCanvas);
+window.addEventListener('beforeunload',e=>{
+  if(state.dirty){e.preventDefault();e.returnValue='';}
+});
+
+// --- Init ---
+(function init(){
+  restoreLastName();
+  resizeCanvas();
+  updateDrawingHash();
+  const p=new URLSearchParams(window.location.search);
+  const hint=p.get('ldraw');
+  if(hint)logMsg(`Hint: load "${hint}" via right-click → Load.`);
+})();
+
+</script>
+</body>
+</html>
