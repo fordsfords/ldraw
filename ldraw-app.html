@@ -721,7 +721,10 @@ function deleteWaypoint(wire,wpId){
 }
 
 function findWireAtInput(deviceName,pinId){
-  // Find the wire/segment connected to a specific input pin
+  // Matches by device name only. Safe because devices that share names
+  // (netsource/netsink) have disjoint pin IDs — no input-pin overlap.
+  // If a future device type shares names AND input pin IDs, this needs
+  // position-based disambiguation like wireSrcMatchesDev.
   for(const w of state.wires){
     for(const seg of w.segments){
       if(seg.downstream.type==='pin'&&seg.downstream.dev===deviceName&&seg.downstream.pin===pinId)
@@ -1892,8 +1895,7 @@ canvas.addEventListener('contextmenu',e=>{
     const wEnd=hitTestWireEnd(c.x,c.y);
     if(wEnd){
       const ww=wEnd.wire;
-      const dev=state.devices.find(d=>d.name===ww.srcDev&&d.geo.pins[ww.srcPin]
-        &&(ww.srcDevX==null||(d.position.x===ww.srcDevX&&d.position.y===ww.srcDevY)));
+      const dev=state.devices.find(d=>wireSrcMatchesDev(ww,d));
       if(dev){
         showPinCtxMenu(dev,wEnd.wire.srcPin,wEnd.wire,e.clientX,e.clientY,wEnd.segment,true);
         return;

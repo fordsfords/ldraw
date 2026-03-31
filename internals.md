@@ -55,9 +55,22 @@ These terms are used precisely throughout this document and in code comments.
 
 ## Implementation Environment
 
-A single self-contained `.html` file, opened directly in Chrome from the
-local file system. No server, no build step, no installed dependencies.
-External JS libraries may be loaded from CDNs.
+The deliverable is a single self-contained `ldraw.html` file, opened
+directly in Chrome from the local file system. No server, no installed
+dependencies. External JS libraries may be loaded from CDNs.
+
+### Source Files and Build
+
+The source is split across two files for maintainability:
+
+* **`symbols.js`** — device symbol definitions (drawing geometry, pin
+  lists, label positions).
+* **`ldraw-app.html`** — everything else (canvas, UI, data model, all
+  interactive logic). Contains an `// @INCLUDE symbols.js` marker where
+  the symbol definitions are injected.
+
+Running **`build.sh`** uses `sed` to inline `symbols.js` at the marker,
+producing the single-file `ldraw.html` that the browser opens.
 
 ### File I/O
 
@@ -655,59 +668,17 @@ file format (no version bump). Old files have unique device names, so
 when these fields are absent, `wireSrcMatchesDev` falls back to
 name + pin matching, which is unambiguous for unique names.
 
+**Downstream references lack position fields.** Downstream segment
+endpoints store `{dev, pin}` only — no position. This is safe because
+the only same-name devices (netsource/netsink) have disjoint pin IDs,
+so Level 1 disambiguation always resolves them. If a future device type
+shares names AND input pin IDs, downstream references would need
+`dstDevX`/`dstDevY` fields paralleling the source side.
+
 ---
 
 ### Phase 6 — Export
 
-`.lsim` generation and `.svg` export.
-
-#### .lsim
-
-See `circuit-language-docs.md` for
-the `.lsim` format. However, please ensure that this file is not
-checked into the repo - it belongs to the lsim project.
-However, do suggest changes to it that would not burden lsim
-but which would assist ldraw.
-
-#### .svg
-
-The SVG viewBox is bounded by the outermost device
+`.lsim` generation and `.svg` export. See `circuit-language-docs.md` for
+the `.lsim` format. The SVG viewBox is bounded by the outermost device
 and wire bounding boxes plus a 2-unit margin.
-
-#### Misc
-
-1. Make vcc and gnd triangles smaller, maybe half their current size.
-And include the device name on the side opposite the wire pin.
-Since these devices cannot be re-oriented, the gnd dev name will be below the triangle,
-and the vcc dev name will be above it.
-
-2. Make netsource and netsink arrows smaller, maybe half their current sizes.
-
-3. Since "save" will now re-save to the same name without a prompt,
-we need an additional menu item for the main canvas context menu:
-"Save as...". This should always prompt.
-
----
-
-### Phase Infinity - Far Future, Probably Never
-
-1. Relax the "you may not move a device if it has an output wire" rule.
-Moving a device with connected outputs will disconnect the ends of the output
-wires to the devices they connect to, but the output wire remains connected
-to the device being moved. The device and output wires move together.
-Wire segments, way points, and branch points should all translate as a group.
-Ideally the whole sub-drawing would be ghosted (device and output wires),
-but it would be acceptable if only the device is ghosted.
-
-2. Draw an irregular selection line around a set of interconnected devices and move them as a group.
-Normally, a device with an output wire may not be moved. However, if that output
-wire is connected to inputs that are part of the group move, then allow it.
-Note that this introduces the concept of a device being "selected".
-Clicking empty canvas de-selects. Clicking a selected device allows dragging the group.
-Ideally, the whole sub-drawing would be ghosted (all devices and output wires),
-but it would be acceptable if only the device grabbed is ghosted.
-This feature also raises questions about what constitutes selecting a device.
-If I draw an irregular selection line that passes through the middle of a device, does that select it?
-Or does it have to be completely within? If my irregular line does not close, how do you determine
-the "inside" vs "outside" of the figure? (Maybe draw a straight line from the starting point to the
-end point?)

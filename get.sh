@@ -28,6 +28,8 @@ if [ -f "$HOME/sford/Downloads/ldraw-repo.tz.b64" ]; then :
   mv_repo "ldraw-repo.tz.b64"
 fi
 for REPO in $HOME/sford/Downloads/ldraw*.b64; do :
-  F=`basename "$REPO"`
-  mv_repo "$F"
+  if [ -f "$REPO" ]; then :
+    F=`basename "$REPO"`
+    mv_repo "$F"
+  fi
 done
