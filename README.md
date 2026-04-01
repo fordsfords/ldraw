@@ -25,6 +25,8 @@ so even if it is buggy, it shouldn't be able to damage anything.
 
 ## Quick Start
 
+Grab a copy of "lsim.html". Store it on your local file system (no server needed). Point Chrome browser at it.
+
 Right-click on empty canvas to access drawing commands: add devices, load/save
 files, pan to coordinates, undo.
 
@@ -59,6 +61,10 @@ An asterisk in the browser tab title indicates unsaved changes.
 | `netsink` | Net Sink | all 4 | — | — |
 
 Singleton devices can only appear once on the canvas.
+
+The `netsource` and `netsink` are pseudo-devices that
+implment "named nets" (basically invisible wires).
+They do not correspond to devices in `lsim`.
 
 ## Wires
 
