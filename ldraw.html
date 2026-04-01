@@ -3,6 +3,15 @@
 <head>
 <meta charset="utf-8">
 <title>ldraw — logic circuit editor</title>
+<!-- ldraw — logic circuit schematic drawing
+     This work is dedicated to the public domain under CC0 1.0 Universal:
+     http://creativecommons.org/publicdomain/zero/1.0/
+     To the extent possible under law, Steven Ford has waived all copyright
+     and related or neighboring rights to this work. In other words, you can 
+     use this code for any purpose without any restrictions.
+     This work is published from: United States.
+     Project home: https://github.com/fordsfords/lsim
+  -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='4' fill='%23222'/><path d='M8 9 L8 23 L15 23 Q22 23 22 16 Q22 9 15 9 Z' fill='none' stroke='%23d0c090' stroke-width='2'/><circle cx='24' cy='16' r='2' fill='none' stroke='%23d0c090' stroke-width='1.8'/><line x1='0' y1='13' x2='8' y2='13' stroke='%23d0c090' stroke-width='2'/><line x1='0' y1='19' x2='8' y2='19' stroke='%23d0c090' stroke-width='2'/><line x1='26' y1='16' x2='32' y2='16' stroke='%23d0c090' stroke-width='2'/></svg>">
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -801,14 +810,16 @@ function clearDirty(){
   updateDrawingHash();
 }
 
-function logMsg(msg){
+const LogLevel={INFO:'INFO',WARN:'WARN',ALERT:'ALERT',ERROR:'ERROR'};
+const _LOG_PREFIX={INFO:'Yep. ',WARN:'Um. ',ALERT:'Yo! ',ERROR:'Oops! '};
+function logMsg(level,msg){
   const line=document.createElement('div');
-  line.textContent=msg;
+  line.textContent=_LOG_PREFIX[level]+msg;
   logPanel.appendChild(line);
   // Keep at most 50 lines
   while(logPanel.children.length>50)logPanel.removeChild(logPanel.firstChild);
   logPanel.scrollTop=logPanel.scrollHeight;
-  if(msg.startsWith('Oops!')||msg.startsWith('Yo!'))beep();
+  if(level===LogLevel.ALERT||level===LogLevel.ERROR)beep();
 }
 
 // --- Utilities ---
@@ -1436,7 +1447,7 @@ function finishExtending(){
   // Check interference
   const hit=checkSegmentInterference(wire,seg,seg.endX,seg.endY);
   if(hit){
-    logMsg(`Oops! Wire ${wire.id} interferes with ${hit}. Restored.`);
+    logMsg(LogLevel.ERROR,`Wire ${wire.id} interferes with ${hit}. Restored.`);
     // Snap back
     seg.endX=origEndX;seg.endY=origEndY;
     seg.downstream=origDownstream;
@@ -1444,7 +1455,7 @@ function finishExtending(){
   }else if(connectTarget){
     // Establish connection
     seg.downstream={type:'pin',dev:connectTarget.device.name,pin:connectTarget.pinId};
-    logMsg(`Yep. Connected wire ${wire.id} to ${connectTarget.device.name}.${connectTarget.pinId}`);
+    logMsg(LogLevel.INFO,`Connected wire ${wire.id} to ${connectTarget.device.name}.${connectTarget.pinId}`);
     setDirty();
   }else{
     // Valid floating drop
@@ -1677,20 +1688,20 @@ function hitTestDevice(cx,cy){
 // --- Placement ---
 function startPlacing(type,sx,sy){
   if(type==='clk'&&state.devices.some(d=>d.type==='clk')){
-    logMsg('Oops! Only one clock device allowed');return;
+    logMsg(LogLevel.ERROR,'Only one clock device allowed');return;
   }
   if(type==='vcc'&&state.devices.some(d=>d.type==='vcc')){
-    logMsg('Oops! Only one VCC device allowed');return;
+    logMsg(LogLevel.ERROR,'Only one VCC device allowed');return;
   }
   if(type==='gnd'&&state.devices.some(d=>d.type==='gnd')){
-    logMsg('Oops! Only one GND device allowed');return;
+    logMsg(LogLevel.ERROR,'Only one GND device allowed');return;
   }
   const cfg=getSelCfg(type);
   let name;
   if(cfg.nextName){
     name=cfg.nextName;
     if(!isNameAvailable(name,type)){
-      logMsg(`Oops! Name "${name}" already in use.`);return;
+      logMsg(LogLevel.ERROR,`Name "${name}" already in use.`);return;
     }
     // Clear nextName so the next placement gets auto-generated
     if(state.selectionParams[type])state.selectionParams[type].nextName=null;
@@ -1720,7 +1731,7 @@ function finishPlacing(){
     position:{x:p.ox,y:p.oy},orientation:p.orientation,geo:p.geo});
   // Phase 5: track most recently placed net device name
   if(p.type==='netsource'||p.type==='netsink') state.lastNetName=p.name;
-  logMsg(`Yep. Placed ${p.type} "${p.name}" at (${p.ox}, ${p.oy})`);
+  logMsg(LogLevel.INFO,`Placed ${p.type} "${p.name}" at (${p.ox}, ${p.oy})`);
   setDirty();
   state.placing=null;state.mode='idle';render();
 }
@@ -1749,10 +1760,10 @@ function pushUndo(){
     geo:d.geo, // geo objects are immutable after creation — safe to share in undo snapshots
   }));
   const wireSnap=JSON.parse(JSON.stringify(state.wires));
-  state.undoStack.push({devices:devSnap,wires:wireSnap,drawingName:state.drawingName});
+  state.undoStack.push({devices:devSnap,wires:wireSnap,drawingName:state.drawingName,lastNetName:state.lastNetName});
 }
 function popUndo(){
-  if(state.undoStack.length===0){logMsg('Yep. Nothing to undo.');return;}
+  if(state.undoStack.length===0){logMsg(LogLevel.INFO,'Nothing to undo.');return;}
   hideCtxMenu();
   const snap=state.undoStack.pop();
   state.devices=snap.devices.map(d=>{
@@ -1761,18 +1772,19 @@ function popUndo(){
   });
   state.wires=snap.wires;
   state.drawingName=snap.drawingName;
+  state.lastNetName=snap.lastNetName??null;
   recalcNameCounters();
   recalcWireCounters();
   setDirty();
   render();
-  logMsg('Yep. Undo.');
+  logMsg(LogLevel.INFO,'Undo.');
 }
 
 // --- Move (Phase 2, updated Phase 3c) ---
 function startMoving(device,sx,sy){
   // Phase 3c: block move if device has output wires
   if(deviceHasOutputWire(device)){
-    logMsg(`Oops! Cannot move "${device.name}" — has a connected output. Delete output wires first.`);
+    logMsg(LogLevel.ERROR,`Cannot move "${device.name}" — has a connected output. Delete output wires first.`);
     return;
   }
   pushUndo();
@@ -1804,8 +1816,8 @@ function finishMoving(){
   m.device.geo=m.geo;
   // Disconnect input wires on non-null move
   const nDisc=disconnectInputWires(m.device);
-  if(nDisc>0) logMsg(`Yep. Moved "${m.device.name}" to (${m.ox}, ${m.oy}) — ${nDisc} input connection(s) broken.`);
-  else logMsg(`Yep. Moved "${m.device.name}" to (${m.ox}, ${m.oy})`);
+  if(nDisc>0) logMsg(LogLevel.INFO,`Moved "${m.device.name}" to (${m.ox}, ${m.oy}) — ${nDisc} input connection(s) broken.`);
+  else logMsg(LogLevel.INFO,`Moved "${m.device.name}" to (${m.ox}, ${m.oy})`);
   setDirty();
   state.moving=null;state.mode='idle';canvas.style.cursor='default';render();
 }
@@ -1842,15 +1854,15 @@ function serializeState(){
 }
 function deserializeState(json){
   let data;
-  try{data=JSON.parse(json);}catch(e){logMsg('Oops! Invalid JSON');return false;}
-  if(!data.version||!Array.isArray(data.devices)){logMsg('Oops! Invalid .ldraw format');return false;}
-  if(data.version<2||data.version>4){logMsg(`Oops! Unsupported file version ${data.version} (expected 2–4)`);return false;}
+  try{data=JSON.parse(json);}catch(e){logMsg(LogLevel.ERROR,'Invalid JSON');return false;}
+  if(!data.version||!Array.isArray(data.devices)){logMsg(LogLevel.ERROR,'Invalid .ldraw format');return false;}
+  if(data.version<2||data.version>4){logMsg(LogLevel.ERROR,`Unsupported file version ${data.version} (expected 2–4)`);return false;}
   state.drawingName=data.drawingName||'unnamed';
   state.devices=[];
   state.wires=[];
   state.undoStack=[];
   for(const d of data.devices){
-    if(!SYMBOL_FACTORIES[d.type]){logMsg(`Oops! Unknown type "${d.type}", skipped`);continue;}
+    if(!SYMBOL_FACTORIES[d.type]){logMsg(LogLevel.ERROR,`Unknown type "${d.type}", skipped`);continue;}
     const params=d.params||{},orient=d.orientation||'right';
     const geo=makeGeo(d.type,d.x,d.y,d.name,params,orient);
     state.devices.push({type:d.type,name:d.name,params,position:{x:d.x,y:d.y},orientation:orient,geo});
@@ -1886,7 +1898,7 @@ async function saveLdraw(forcePrompt){
       try{
         const w=await h.createWritable();
         await w.write(json);await w.close();
-        logMsg(`Yep. Saved ${h.name}`);
+        logMsg(LogLevel.INFO,`Saved ${h.name}`);
         clearDirty();render();
         return;
       }catch(e){
@@ -1903,10 +1915,10 @@ async function saveLdraw(forcePrompt){
     const w=await newH.createWritable();await w.write(json);await w.close();
     state.writeHandle=newH;state.lastHandle=newH;state.lastName=newH.name;
     persistLastName();
-    logMsg(`Yep. Saved ${newH.name}`);
+    logMsg(LogLevel.INFO,`Saved ${newH.name}`);
     clearDirty();render();
   }catch(e){
-    if(e.name!=='AbortError')logMsg('Oops! Save error: '+e.message);
+    if(e.name!=='AbortError')logMsg(LogLevel.ERROR,'Save error: '+e.message);
   }
 }
 async function loadLdraw(){
@@ -1927,14 +1939,14 @@ async function loadLdraw(){
       persistLastName();
       state.mode='idle';
       clearDirty();
-      logMsg(`Yep. Loaded ${h.name} — ${state.devices.length} device(s), ${state.wires.length} wire(s)`);
+      logMsg(LogLevel.INFO,`Loaded ${h.name} — ${state.devices.length} device(s), ${state.wires.length} wire(s)`);
       render();
     }
-  }catch(e){if(e.name!=='AbortError')logMsg('Oops! Load error: '+e.message);}
+  }catch(e){if(e.name!=='AbortError')logMsg(LogLevel.ERROR,'Load error: '+e.message);}
 }
 function handleFileDrop(file){
-  if(state.mode!=='idle'){logMsg('Oops! Cannot load while an operation is in progress.');return;}
-  if(!file.name.endsWith('.ldraw')){logMsg('Oops! Not a .ldraw file');return;}
+  if(state.mode!=='idle'){logMsg(LogLevel.ERROR,'Cannot load while an operation is in progress.');return;}
+  if(!file.name.endsWith('.ldraw')){logMsg(LogLevel.ERROR,'Not a .ldraw file');return;}
   if(state.dirty){
     if(!confirm('You have unsaved changes. Load anyway and discard them?'))return;
   }
@@ -1943,7 +1955,7 @@ function handleFileDrop(file){
     if(deserializeState(r.result)){
       state.writeHandle=null;state.lastName=file.name;persistLastName();state.mode='idle';
       clearDirty();
-      logMsg(`Yep. Loaded ${file.name} (dropped) — ${state.devices.length} device(s), ${state.wires.length} wire(s)`);
+      logMsg(LogLevel.INFO,`Loaded ${file.name} (dropped) — ${state.devices.length} device(s), ${state.wires.length} wire(s)`);
       render();
     }
   };
@@ -1973,7 +1985,7 @@ function generateLsimDCmd(d){
 // Returns {dev,pin} or null if the chain is broken.
 function resolveNetSource(wire,visited){
   if(!visited)visited=new Set();
-  if(visited.has(wire.id)){logMsg('Um, circular named-net reference detected.');return null;}
+  if(visited.has(wire.id)){logMsg(LogLevel.WARN,'Circular named-net reference detected.');return null;}
   visited.add(wire.id);
   const srcDev=state.devices.find(d=>wireSrcMatchesDev(wire,d));
   if(!srcDev)return null;
@@ -2000,7 +2012,7 @@ function generateLsim(){
     for(const seg of w.segments){
       // Check for floating ends
       if(seg.downstream.type==='floating'){
-        warnings.push(`Um, wire ${w.id} from ${w.srcDev}.${w.srcPin} has a floating end.`);
+        warnings.push(`Wire ${w.id} from ${w.srcDev}.${w.srcPin} has a floating end.`);
         continue;
       }
       if(seg.downstream.type!=='pin')continue;
@@ -2009,7 +2021,7 @@ function generateLsim(){
       if(!dstDev)continue;
       if(dstDev.type==='netsource'||dstDev.type==='netsink')continue;
       if(!src){
-        warnings.push(`Um, cannot resolve source for connection to ${dstDev.name}.${seg.downstream.pin}.`);
+        warnings.push(`Cannot resolve source for connection to ${dstDev.name}.${seg.downstream.pin}.`);
         continue;
       }
       lines.push(`c;${src.dev};${src.pin};${dstDev.name};${seg.downstream.pin};`);
@@ -2019,17 +2031,17 @@ function generateLsim(){
   for(const d of state.devices){
     if(d.type==='netsink'){
       const hasSource=state.devices.some(s=>s.type==='netsource'&&s.name===d.name);
-      if(!hasSource)warnings.push(`Um, netsink "${d.name}" has no matching netsource.`);
+      if(!hasSource)warnings.push(`Netsink "${d.name}" has no matching netsource.`);
     }
     if(d.type==='netsource'){
       if(!findWireAtInput(d.name,'i0'))
-        warnings.push(`Um, netsource "${d.name}" has nothing connected to its input.`);
+        warnings.push(`Netsource "${d.name}" has nothing connected to its input.`);
     }
     if(d.type!=='netsource'&&d.type!=='netsink'){
       for(const pinId of Object.keys(d.geo.pins)){
         if(isOutputPin(d.type,pinId))continue;
         if(!findWireAtInput(d.name,pinId))
-          warnings.push(`Um, ${d.name}.${pinId} is unconnected.`);
+          warnings.push(`${d.name}.${pinId} is unconnected.`);
       }
     }
   }
@@ -2038,7 +2050,7 @@ function generateLsim(){
 async function exportLsim(){
   try{
     const{text,warnings}=generateLsim();
-    for(const w of warnings)logMsg(w);
+    for(const w of warnings)logMsg(LogLevel.WARN,w);
     const defaultName=state.drawingName+'.lsim';
     const opts={
       suggestedName:defaultName,
@@ -2050,12 +2062,12 @@ async function exportLsim(){
     const nD=text.split('\n').filter(l=>l.startsWith('d;')).length;
     const nC=text.split('\n').filter(l=>l.startsWith('c;')).length;
     if(warnings.length>0){
-      logMsg(`Yo! Exported ${h.name} — ${nD} device(s), ${nC} connection(s), ${warnings.length} warning(s) — check log.`);
+      logMsg(LogLevel.ALERT,`Exported ${h.name} — ${nD} device(s), ${nC} connection(s), ${warnings.length} warning(s) — check log.`);
     }else{
-      logMsg(`Yep. Exported ${h.name} — ${nD} device(s), ${nC} connection(s).`);
+      logMsg(LogLevel.INFO,`Exported ${h.name} — ${nD} device(s), ${nC} connection(s).`);
     }
   }catch(e){
-    if(e.name!=='AbortError')logMsg('Oops! Export error: '+e.message);
+    if(e.name!=='AbortError')logMsg(LogLevel.ERROR,'Export error: '+e.message);
   }
 }
 
@@ -2283,18 +2295,18 @@ document.getElementById('ctx-pan').addEventListener('click',()=>{
   const xs=prompt('Pan to X:','0');if(xs===null)return;
   const ys=prompt('Pan to Y:','0');if(ys===null)return;
   const x=parseInt(xs),y=parseInt(ys);
-  if(isNaN(x)||isNaN(y)){logMsg('Oops! Invalid coordinates');return;}
+  if(isNaN(x)||isNaN(y)){logMsg(LogLevel.ERROR,'Invalid coordinates');return;}
   state.panX=-x;state.panY=-y;render();
 });
 document.getElementById('ctx-drawing-name').addEventListener('click',()=>{
   const sx=parseInt(ctxMenu.style.left),sy=parseInt(ctxMenu.style.top);
   hideCtxMenu();
   showModalDialog('Drawing name','Name',state.drawingName,(newName)=>{
-    if(!newName){logMsg('Oops! Drawing name cannot be empty.');return;}
+    if(!newName){logMsg(LogLevel.ERROR,'Drawing name cannot be empty.');return;}
     if(newName===state.drawingName)return;
     pushUndo();
     state.drawingName=newName;
-    logMsg(`Yep. Drawing name set to "${newName}".`);
+    logMsg(LogLevel.INFO,`Drawing name set to "${newName}".`);
     setDirty();render();
   },sx,sy);
 });
@@ -2313,10 +2325,10 @@ document.getElementById('ctx-dev-rename').addEventListener('click',()=>{
   const sx=parseInt(ctxMenu.style.left),sy=parseInt(ctxMenu.style.top);
   hideCtxMenu();
   showModalDialog('Rename device','New name',d.name,(newName)=>{
-    if(!newName){logMsg('Oops! Name cannot be empty.');return;}
+    if(!newName){logMsg(LogLevel.ERROR,'Name cannot be empty.');return;}
     if(newName===d.name)return;
     if(!isNameAvailable(newName,d.type)){
-      logMsg(`Oops! Name "${newName}" already in use.`);return;
+      logMsg(LogLevel.ERROR,`Name "${newName}" already in use.`);return;
     }
     pushUndo();
     const oldName=d.name;
@@ -2330,10 +2342,10 @@ document.getElementById('ctx-dev-rename').addEventListener('click',()=>{
           count++;
         }
       }
-      if(count>0) logMsg(`Yep. Renamed to "${newName}" (${count} net sink(s) updated).`);
-      else logMsg(`Yep. Renamed to "${newName}".`);
+      if(count>0) logMsg(LogLevel.INFO,`Renamed to "${newName}" (${count} net sink(s) updated).`);
+      else logMsg(LogLevel.INFO,`Renamed to "${newName}".`);
     }else{
-      logMsg(`Yep. Renamed to "${newName}".`);
+      logMsg(LogLevel.INFO,`Renamed to "${newName}".`);
     }
     if(d.type==='netsource'||d.type==='netsink') state.lastNetName=newName;
     setDirty();render();
@@ -2343,15 +2355,15 @@ document.getElementById('ctx-dev-delete').addEventListener('click',()=>{
   const d=ctxDeviceTarget;if(!d)return;
   // Phase 3c: block delete if device has output wires
   if(deviceHasOutputWire(d)){
-    logMsg(`Oops! Cannot delete "${d.name}" — has a connected output. Delete output wires first.`);
+    logMsg(LogLevel.ERROR,`Cannot delete "${d.name}" — has a connected output. Delete output wires first.`);
     hideCtxMenu();return;
   }
   pushUndo();
   // Phase 3c: disconnect input wires before removing device
   const nDisc=disconnectInputWires(d);
   state.devices.splice(state.devices.indexOf(d),1);
-  if(nDisc>0) logMsg(`Yep. Deleted "${d.name}" — ${nDisc} input connection(s) broken.`);
-  else logMsg(`Yep. Deleted "${d.name}".`);
+  if(nDisc>0) logMsg(LogLevel.INFO,`Deleted "${d.name}" — ${nDisc} input connection(s) broken.`);
+  else logMsg(LogLevel.INFO,`Deleted "${d.name}".`);
   setDirty();
   hideCtxMenu();render();
 });
@@ -2360,7 +2372,7 @@ document.getElementById('ctx-dev-toggle-state').addEventListener('click',()=>{
   pushUndo();
   d.params.initialState=d.params.initialState?0:1;
   d.geo=makeGeo(d.type,d.position.x,d.position.y,d.name,d.params,d.orientation);
-  logMsg(`Yep. ${d.name} initial state set to ${d.params.initialState}`);
+  logMsg(LogLevel.INFO,`${d.name} initial state set to ${d.params.initialState}`);
   setDirty();
   hideCtxMenu();render();
 });
@@ -2377,15 +2389,15 @@ for(const el of document.querySelectorAll('.ctx-orient-dir')){
     const newOrient=el.dataset.dir;
     if(newOrient===d.orientation)return;
     if(deviceHasOutputWire(d)){
-      logMsg(`Oops! Cannot reorient "${d.name}" — has a connected output. Delete output wires first.`);
+      logMsg(LogLevel.ERROR,`Cannot reorient "${d.name}" — has a connected output. Delete output wires first.`);
       hideCtxMenu();return;
     }
     pushUndo();
     const nDisc=disconnectInputWires(d);
     d.orientation=newOrient;
     d.geo=makeGeo(d.type,d.position.x,d.position.y,d.name,d.params,d.orientation);
-    if(nDisc>0) logMsg(`Yep. Reoriented "${d.name}" to ${newOrient} — ${nDisc} input connection(s) broken.`);
-    else logMsg(`Yep. Reoriented "${d.name}" to ${newOrient}.`);
+    if(nDisc>0) logMsg(LogLevel.INFO,`Reoriented "${d.name}" to ${newOrient} — ${nDisc} input connection(s) broken.`);
+    else logMsg(LogLevel.INFO,`Reoriented "${d.name}" to ${newOrient}.`);
     setDirty();
     hideCtxMenu();render();
   });
@@ -2405,7 +2417,7 @@ for(const el of document.querySelectorAll('.ctx-nw-dir')){
     const dir=el.dataset.dir;
     pushUndo();
     const w=createWire(t.device,t.pinId,dir);
-    logMsg(`Yep. Created wire ${w.id} on ${t.device.name}.${t.pinId} heading ${dir}`);
+    logMsg(LogLevel.INFO,`Created wire ${w.id} on ${t.device.name}.${t.pinId} heading ${dir}`);
     setDirty();
     hideCtxMenu();render();
   });
@@ -2414,7 +2426,7 @@ document.getElementById('ctx-pin-delwire').addEventListener('click',()=>{
   const t=ctxPinTarget;if(!t||!t.wire)return;
   pushUndo();
   deleteWire(t.wire);
-  logMsg(`Yep. Deleted wire ${t.wire.id}`);
+  logMsg(LogLevel.INFO,`Deleted wire ${t.wire.id}`);
   setDirty();
   hideCtxMenu();render();
 });
@@ -2434,7 +2446,7 @@ for(const el of document.querySelectorAll('.ctx-wp-dir')){
     const dir=el.dataset.dir;
     pushUndo();
     const result=addWaypoint(t.wire,t.segment,dir);
-    logMsg(`Yep. Added waypoint on wire ${t.wire.id}, new segment ${result.segment.id} heading ${dir}`);
+    logMsg(LogLevel.INFO,`Added waypoint on wire ${t.wire.id}, new segment ${result.segment.id} heading ${dir}`);
     setDirty();
     hideCtxMenu();render();
   });
@@ -2451,9 +2463,9 @@ document.getElementById('ctx-wp-delete').addEventListener('click',()=>{
     if(segIds.includes(seg.id)&&seg.downstream.type==='pin')nDisc++;
   }
   deleteWaypoint(t.wire,t.waypoint.id);
-  let msg=`Yep. Deleted waypoint on wire ${t.wire.id}`;
+  let msg=`Deleted waypoint on wire ${t.wire.id}`;
   if(nDisc>0)msg+=` — ${nDisc} connection(s) broken`;
-  logMsg(msg);
+  logMsg(LogLevel.INFO,msg);
   setDirty();
   hideCtxMenu();render();
 });
@@ -2475,7 +2487,7 @@ for(const el of document.querySelectorAll('.ctx-bp-end-t')){
     const tKey=el.dataset.t;
     pushUndo();
     const result=addBranchPointAtEnd(t.wire,t.segment,tKey);
-    logMsg(`Yep. Added branch point ${result.branchPoint.id} on wire ${t.wire.id}, segments ${result.segments.map(s=>s.id).join(', ')}`);
+    logMsg(LogLevel.INFO,`Added branch point ${result.branchPoint.id} on wire ${t.wire.id}, segments ${result.segments.map(s=>s.id).join(', ')}`);
     setDirty();
     hideCtxMenu();render();
   });
@@ -2492,9 +2504,9 @@ document.getElementById('ctx-bp-delete').addEventListener('click',()=>{
     if(segIds.includes(seg.id)&&seg.downstream.type==='pin')nDisc++;
   }
   deleteBranchPoint(t.wire,t.branchPoint.id);
-  let msg=`Yep. Deleted branch point on wire ${t.wire.id}`;
+  let msg=`Deleted branch point on wire ${t.wire.id}`;
   if(nDisc>0)msg+=` — ${nDisc} connection(s) broken`;
-  logMsg(msg);
+  logMsg(LogLevel.INFO,msg);
   setDirty();
   hideCtxMenu();render();
 });
@@ -2514,7 +2526,7 @@ for(const el of document.querySelectorAll('.ctx-bp-mid-t')){
     const tKey=el.dataset.t;
     pushUndo();
     const result=addBranchPointMidSegment(t.wire,t.segment,t.snapX,t.snapY,tKey);
-    logMsg(`Yep. Inserted branch point ${result.branchPoint.id} on wire ${t.wire.id}, branch segment ${result.branchSegment.id}`);
+    logMsg(LogLevel.INFO,`Inserted branch point ${result.branchPoint.id} on wire ${t.wire.id}, branch segment ${result.branchSegment.id}`);
     setDirty();
     hideCtxMenu();render();
   });
@@ -2678,7 +2690,7 @@ window.addEventListener('beforeunload',e=>{
   updateDrawingHash();
   const p=new URLSearchParams(window.location.search);
   const hint=p.get('ldraw');
-  if(hint)logMsg(`Yep. Hint: load "${hint}" via right-click → Load.`);
+  if(hint)logMsg(LogLevel.INFO,`Hint: load "${hint}" via right-click → Load.`);
 })();
 
 </script>

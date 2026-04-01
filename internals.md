@@ -48,8 +48,8 @@ These terms are used precisely throughout this document and in code comments.
     collinear run.
   - All other overlap (device-device, device-wire, etc.) is the user's
     responsibility.
-* **Oops** — an error message in the log panel, prefixed with "Oops!"
-  and accompanied by an audible beep. See Log Message Prefixes below.
+* **Oops** — an error log message (level `ERROR`). Accompanied by an
+  audible beep. See Log Message Prefixes below.
 
 ---
 
@@ -69,7 +69,7 @@ The source is split across two files for maintainability:
   interactive logic). Contains an `// @INCLUDE symbols.js` marker where
   the symbol definitions are injected.
 
-Running **`build.sh`** uses `sed` to inline `symbols.js` at the marker,
+Running **`bld.sh`** uses `sed` to inline `symbols.js` at the marker,
 producing the single-file `ldraw.html` that the browser opens.
 
 ### File I/O
@@ -93,23 +93,26 @@ The tool remembers the most recently used filename and directory.
   dialog).
 * **No backward compatibility.** When the data model changes, the `.ldraw`
   version number is incremented. No migration from older versions.
-* All log messages have a prefix — see Log Message Prefixes below.
+* All log messages are written via `logMsg(level, msg)` using a `LogLevel`
+  enum. See Log Message Prefixes below.
 * Debug output goes to `console.log`.
 
 ### Log Message Prefixes
 
-Every message written to the log panel starts with one of four prefixes:
+All log output goes through `logMsg(level, msg)`. The `level` parameter
+is one of four values from the `LogLevel` enum, which controls the
+prefix prepended to `msg` and whether a beep is emitted:
 
-| Prefix | Meaning | Beep |
-|--------|---------|------|
-| `Yep.` | Informational — operation succeeded | no |
-| `Oops!` | Error — operation failed, not performed | yes |
-| `Um,` | Warning detail — something to review | no |
-| `Yo!` | Attention summary — aggregates warnings | yes |
+| `LogLevel` | Prefix | Meaning | Beep |
+|------------|--------|---------|------|
+| `INFO`  | `Yep. ` | Informational — operation succeeded | no |
+| `ERROR` | `Oops! ` | Error — operation failed, not performed | yes |
+| `WARN`  | `Um. ` | Warning detail — something to review | no |
+| `ALERT` | `Yo! ` | Attention summary — aggregates warnings | yes |
 
-`Um,` warnings may appear in batches (e.g. during export). The `Yo!`
+`WARN` messages may appear in batches (e.g. during export). The `ALERT`
 summary at the end provides a single beep so the user knows to check
-the log. If there are no warnings, `Yep.` is used instead.
+the log. If there are no warnings, `INFO` is used instead.
 
 ---
 
@@ -204,8 +207,7 @@ against circular references.
 
 ### Validity warnings
 
-The export checks for three categories of problems, each reported as
-an `Um,` log message:
+The export checks for three categories of problems, each reported as a `WARN`-level log message:
 
 * **Floating wire ends** — segments with `downstream.type === 'floating'`.
 * **Unconnected device input pins** — input pins with no wire attached
@@ -216,7 +218,7 @@ an `Um,` log message:
 
 Warnings do not block the export. The file is written with as much
 content as can be generated. If any warnings were produced, the summary
-uses `Yo!` (with beep); otherwise `Yep.`.
+uses `ALERT` (with beep); otherwise `INFO`.
 
 ---
 
@@ -752,7 +754,7 @@ shares names AND input pin IDs, downstream references would need
 **Phase 6a — Misc:** Complete. Half-size gnd/vcc triangles with name
 labels, half-size netsource/netsink arrows, "Save as…" menu item,
 switch `initialState` parameter, device orientation change from context
-menu, log message prefix system (Yep/Oops/Um/Yo).
+menu, log message prefix system (LogLevel enum: INFO/ERROR/WARN/ALERT).
 
 **Phase 6b — .lsim export:** Complete. See `.lsim` Output Format above.
 
@@ -762,3 +764,111 @@ be bounded by the outermost device and wire bounding boxes plus a
 red/yellow and floating wire yellow). The existing `_renderShapesSVG`
 and `_renderLabelsSVG` helpers can be reused. No validity checking
 needed for SVG.
+
+---
+
+### Phase 7 — Move device with connected output wires (deferred)
+
+**Status:** Not yet implemented. Considered and scoped; implementation deferred.
+
+#### Motivation
+
+The current rule — a device with output wires may not be moved — is a blunt
+guard against accidental disconnection. It becomes an obstacle on complex
+drawings where the user needs to nudge a placed device after routing is done.
+
+#### Proposed behaviour
+
+When a device with output wires is moved:
+
+- The device and all output wire trees translate together as a rigid group.
+  All segments, waypoints, and branch points move by the same (dx, dy).
+- Input connections at the *far ends* of those wire trees (leaf segments
+  connected to other devices' input pins) are **broken** — those segment
+  endpoints become floating.
+- Input wires *into* the moved device are also broken, as they are today.
+
+The net effect: the moved device and its full output fan-out lift and
+re-land as a unit; only the connections to *other* devices' inputs are
+severed. The user re-routes those leaf connections after the move.
+
+#### Ghost rendering
+
+Ghosting the device body only (the current `state.moving.geo` path) is
+acceptable for a first implementation. Ghosting the full wire tree in
+translucent form would be a better UX but is a rendering addition on
+top of the data-model change.
+
+#### Why this is Phase 7 and not Phase Infinity
+
+The data-model work is straightforward: `finishMoving` needs to translate
+all `(endX, endY)` coordinates of segments in wires sourced by the moved
+device, and translate all `(x, y)` of their waypoints and branch points.
+The interference check can be skipped on move (same as today — the user
+is responsible for overlaps). The disconnection logic already exists.
+Estimated complexity: moderate.
+
+#### Incremental wire re-routing (related, also deferred)
+
+A lighter-weight variant was considered: after a small move, attempt to
+repair attached wire segments by adjusting segment lengths rather than
+breaking connections. The feasibility analysis concluded:
+
+- **Common case is tractable.** For a simple L-shaped or Z-shaped wire,
+  only the segment(s) adjacent to the moved pin need to change length.
+  The rest of the wire can stay put. A greedy local adjustment — absorb
+  the delta into the segments nearest the moved device first — handles
+  this correctly.
+- **Degenerate cases require fallback.** If the adjustment would collapse
+  a segment to zero or negative length (the device moved past a waypoint),
+  the repair cannot succeed without deleting or relocating waypoints. The
+  correct fallback is to break the connection and leave it floating, same
+  as Phase 7 behaviour.
+- **Branch points add complexity.** A wire tree can be partially repairable
+  — some branches fit, others do not. Partial repair with selective
+  breakage is significantly harder to specify and test than a clean
+  break-everything approach.
+
+Conclusion: incremental re-routing is worth revisiting after Phase 7 is
+implemented, as a refinement on top of it. It should not gate Phase 7.
+
+---
+
+### Phase Infinity — Lasso select and group move
+
+**Status:** Considered and deferred indefinitely. Too large a lift for the
+current scope of the tool.
+
+#### Concept
+
+Allow the user to draw a freehand selection boundary around a set of
+devices and move them as a group, preserving internal wire connections
+while breaking wires that cross the selection boundary.
+
+#### Open design questions (unresolved)
+
+- **Partial containment:** Whether a device whose bounding box is only
+  partially inside the lasso boundary counts as selected. Recommended
+  default: require full containment.
+- **Unclosed lasso:** If the user releases the mouse without closing the
+  polygon, close it with a straight line from end point to start point
+  (standard convention).
+- **Boundary-crossing wires:** A wire tree can be partially inside and
+  partially outside. All segments whose downstream endpoint lands on an
+  inside device move with the group; segments crossing the boundary are
+  broken at the boundary end.
+- **Selection state and undo:** Selection state should not be part of the
+  undo stack. `pushUndo` must fire at drag-start, not at selection time.
+
+#### Why deferred
+
+The constraint logic for boundary-crossing wire trees is non-trivial.
+Classifying every wire endpoint as inside or outside the selection polygon
+requires per-device membership testing for both `srcDev` and all
+`downstream.dev` references, with branch points complicating the tree walk.
+This is a qualitatively larger feature than any phase implemented to date,
+and the usability payoff does not justify the implementation cost at this
+stage of the project.
+
+Prerequisite: Phase 7 (move with output wires) should be implemented first,
+since group move depends on single-device-move-with-wires working cleanly.
