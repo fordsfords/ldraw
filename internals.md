@@ -3,7 +3,48 @@
 Maintainer reference for the ldraw logic circuit schematic drawing tool.
 For end-user documentation, see [README.md](README.md).
 
----
+This document should only contain information that would be of genuine
+use to a future maintainer, be they human or AI.
+
+<!-- mdtoc-start -->
+&bull; [ldraw Internals](#ldraw-internals)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Purpose and Background](#purpose-and-background)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Definitions](#definitions)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Implementation Environment](#implementation-environment)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Source Files and Build](#source-files-and-build)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [File I/O](#file-io)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Constraints](#constraints)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Log Message Prefixes](#log-message-prefixes)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [`.ldraw` File Format](#ldraw-file-format)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [`.lsim` Output Format](#lsim-output-format)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Device commands](#device-commands)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Connect commands](#connect-commands)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Validity warnings](#validity-warnings)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Pin Naming Convention](#pin-naming-convention)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Data Model](#data-model)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Devices](#devices)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Wires](#wires)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Named Net](#named-net)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Symbol Library](#symbol-library)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Architecture: geometry/render separation](#architecture-geometryrender-separation)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Dispatch tables](#dispatch-tables)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Shared helpers](#shared-helpers)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Coordinate constants](#coordinate-constants)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Supported device types](#supported-device-types)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Extensibility](#extensibility)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Design Decisions](#design-decisions)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Coding Guidelines](#coding-guidelines)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Known Quirks](#known-quirks)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Known Inefficiencies](#known-inefficiencies)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Future Work](#future-work)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Phase 6 — Export](#phase-6--export)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Phase 7 — Incremental wire re-routing (related, also deferred)](#phase-7--incremental-wire-re-routing-related-also-deferred)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Phase Infinity — Lasso select and group move](#phase-infinity--lasso-select-and-group-move)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Concept](#concept)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Open design questions (unresolved)](#open-design-questions-unresolved)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Why deferred](#why-deferred)  
+<!-- TOC created by '../mdtoc/mdtoc.pl internals.md' (see https://github.com/fordsfords/mdtoc) -->
+<!-- mdtoc-end -->
 
 ## Purpose and Background
 
@@ -34,7 +75,7 @@ These terms are used precisely throughout this document and in code comments.
 * **Waypoint** — a point where one segment ends and another begins,
   forming a turn. One upstream segment, one downstream segment.
 * **Branch point** — a T-junction where one segment fans out to two.
-  One upstream segment, two downstream segments. *(Phase 4b.)*
+  One upstream segment, two downstream segments.
 * **Upstream** — the direction toward the driving device's output pin.
 * **Downstream** — the direction toward the consuming device's input pins.
 * **Fine grid** (`PIN_SPACE = 10`) — the snap granularity. All positions
@@ -43,7 +84,7 @@ These terms are used precisely throughout this document and in code comments.
 * **Pin pitch** (`PIN_PITCH = 20`) — minimum spacing between pins on a
   device (2 fine-grid steps).
 * **Interfere** — overlap or touch between objects in a disallowed way.
-  Current interference rules (most were removed in Phase 4a):
+  Current interference rules:
   - Two wire segments from different wires cannot share any portion of a
     collinear run.
   - All other overlap (device-device, device-wire, etc.) is the user's
@@ -258,7 +299,7 @@ Wire object structure:
 * `srcDev`, `srcPin` — the driving device output.
 * `segments[]` — flat array of segment objects.
 * `waypoints[]` — flat array of `{id, x, y}` objects.
-* `branchPoints[]` — flat array of `{id, x, y}` objects (Phase 4b).
+* `branchPoints[]` — flat array of `{id, x, y}` objects.
 
 Segment object structure:
 * `id` — unique within session.
@@ -277,11 +318,11 @@ functions: `findSegByUpstreamWp`, `findSegByDownstreamWp`,
 ### Named Net
 
 `netsource` and `netsink` are pseudo devices with a single pin each.
-Placeable as normal devices. When generating `.lsim` output (Phase 6),
+Placeable as normal devices. When generating `.lsim` output,
 like-named net pairs are treated as direct wire connections (`c` commands)
 rather than devices. Net devices share names (enforced by
 `isNameAvailable`). Cascade rename, orphan detection, and colour
-rendering are implemented in Phase 5.
+rendering are implemented.
 
 ---
 
@@ -375,7 +416,7 @@ No other code changes required.
 
 ## Design Decisions
 
-**Interference checking (simplified in Phase 4a).** Most interference
+**Interference checking.** Most interference
 checks were removed. The only remaining check is collinear overlap between
 segments of different wires. All other overlap is the user's responsibility.
 This significantly simplified the code.
@@ -453,7 +494,7 @@ Cancel. No auto-save-on-edit.
 **Future-phase documentation.** When updating this document after
 completing a phase, do NOT remove or compress detail from future phases.
 Future-phase requirements should remain in full until that phase is
-implemented. Losing detail forces the user to dig through git history,
+implemented. Losing future detail forces the user to dig through git history,
 which defeats the purpose of having a living document.
 
 ---
@@ -479,11 +520,11 @@ practical gain.
 No realistic circuit approaches this limit.
 
 **Wire lookups use pin + position checks for disambiguation.** Net
-devices share names (Phase 5). For `downstream.dev` lookups, verifying
+devices share names. For `downstream.dev` lookups, verifying
 the pin exists in `device.geo.pins` suffices (cross-type disambiguation).
 For `srcDev` lookups, same-type devices (e.g. two netsinks) also need
 position matching via `wireSrcMatchesDev`. New code that resolves a
-device from wire references must follow this pattern — see the Phase 5
+device from wire references must follow this pattern — see
 "Wire Reference Disambiguation" section for details.
 
 ---
@@ -507,246 +548,6 @@ rename. Linear scan is fine for any realistic device count.
 
 ## Future Work
 
-### Phase 4b — Branch Points ✓
-
-Branch points enable fan-out: one output driving multiple inputs via a
-binary tree of segments. A branch point has one upstream segment and two
-downstream segments.
-
-**Terminology note:** The original requirements used "break point" in
-places. The correct term is "branch point" throughout.
-
-**Status:** Complete. File version incremented to 3 (reads 2 and 3).
-
-#### Append Branch Point
-
-Right-click on the floating end of a leaf segment. Context menu includes
-"Branch point ▸". Hovering shows four T-junction orientations graphically.
-The orientation that does not connect to the upstream segment is greyed out.
-Selecting one inserts the branch point and appends two 1-grid-unit segments
-in the chosen directions.
-
-The previously-floating segment turns black. Both new segments are yellow.
-
-Remember to do the appropriate escape and undo processing.
-
-#### Delete Branch Point
-
-Right-click on a branch point → "Delete branch point". Deletes the branch
-point and all downstream elements (segments, waypoints, branch points).
-May result in disconnections from device inputs. The upstream segment
-becomes floating (yellow).
-
-#### Branch Point Insertion (mid-segment)
-
-Right-click on a wire segment (not at its ends) → "Branch point ▸".
-Shows 4 T-orientations; the two that don't connect to the existing
-segments are greyed out. Selecting one splits the segment into two
-at the click point and creates a new 1-grid-unit segment in the chosen
-direction.
-
-This requires a new hit-test for clicking on wire segment bodies
-(not just endpoints).
-
-#### Branch Point Save/Restore
-
-Branch point data must be saved/restored in `.ldraw` files. The wire's
-`branchPoints` array (currently always empty) will be populated.
-If data model changes are needed, increment the version number.
-
-#### Implementation notes for 4b
-
-The `collectDownstream` function (added in 4a) was rewritten to walk the
-binary tree structure recursively. It now takes `(wire, nodeType, nodeId)`
-where `nodeType` is `'waypoint'` or `'branchpoint'`, and returns
-`{wpIds, bpIds, segIds}`.
-
-Key new functions: `addBranchPointAtEnd`, `addBranchPointMidSegment`,
-`deleteBranchPoint`, `hitTestBranchPoint`, `hitTestSegmentBody`,
-`findSegsByUpstreamBp`, `findSegByDownstreamBp`.
-
-T-junction orientations are defined in `T_JUNCTIONS` with four keys:
-`tr` (├), `tl` (┤), `tu` (┴), `td` (┬). Each maps to three directions.
-Menu items show only the box-drawing glyph; direction arrows were removed
-to reduce clutter.
-
-The `checkSegmentInterference` function only checks collinear overlap
-with other wires' segments. This remains unchanged for branch points.
-
----
-
-### Phase 4c — Misc ✓
-
-**Status:** Complete. File version incremented to 4 (reads 2–4).
-
-#### Drawing Name
-
-A drawing has a name stored in `state.drawingName`, initialized to
-"unnamed". Right-clicking on the empty pane of normal view includes a
-menu item "Rename drawing…" that opens a durable modal dialog with
-OK/Cancel. The name is saved in the `.ldraw` file and restored on load
-(defaults to "unnamed" for older files). Drawing name changes are
-included in undo snapshots.
-
-#### Drawing Hash
-
-A djb2 hash of the serialized drawing state, stored in
-`state.drawingHash`. Recalculated every time `setDirty()` or
-`clearDirty()` fires. Displayed as 8-digit uppercase hex in the status
-line.
-
-#### Status Line
-
-The normal view has a white status bar at the top of the canvas
-displaying: drawing name, dirty indicator (`*`), hash, and mode ("normal")
-left-justified; pan coordinates right-justified. The selection view
-header is unchanged.
-
-#### Explicit Commit Model
-
-All popups and dialogs use OK/Cancel buttons, are durable (not dismissed
-by clicking outside), and treat Escape as Cancel.
-
-Context menus are action-only — no inline edit fields. The device context
-menu has a "Rename device…" action that opens a separate modal dialog.
-The selection-view parameter editor has OK/Cancel buttons; values are
-committed on OK (fixes the typed-name-without-Enter issue from the
-previous auto-apply-on-change design).
-
-#### Save Improvements
-
-The save picker suggests the drawing name plus `.ldraw` as the default
-filename when no prior save name exists (e.g. a drawing named "sr-latch"
-suggests "sr-latch.ldraw"). The last saved filename is persisted to
-`localStorage` so it survives page reloads.
-
-#### Bug Fix
-
-The branch point submenu (`ctx-pin-bp-row`) was a sibling of the pin
-context menu div (`ctxPin`) instead of a child, causing it to appear
-in all context menus (e.g. the device context menu). Moved inside
-`ctxPin`.
-
----
-
-### Phase 5 — Named Nets ✓
-
-Cascade rename, orphan detection, red/yellow rendering for net device
-status. No file version increment (runtime behaviour only).
-
-**Status:** Complete.
-
-#### Concept
-
-`netsource` and `netsink` are pseudo devices with a single pin each.
-A netsource has an input pin (`i0`) — it receives a signal (e.g. from
-vcc, gnd, clk) and forwards it to the "named net". A netsink has an
-output pin (`o0`) — it delivers the net's signal to a destination
-device's input. Conceptually, a named net is like a branch point with
-any number of downstream legs.
-
-When generating `.lsim` output (Phase 6), like-named net pairs are
-treated as direct wire connections (`c` commands) rather than devices.
-
-#### Name Sharing and Collision Rules
-
-Unlike other device types, net devices are designed to share names:
-all devices belonging to the same net share one name.
-
-`isNameAvailable(name, forType)` enforces type-specific rules:
-
-* **netsource**: name must not collide with any non-net device or any
-  other netsource. May match netsinks (that is the intended usage).
-* **netsink**: name must not collide with any non-net device. May match
-  netsources and other netsinks.
-* **all other types**: name must not collide with any device at all
-  (original behaviour unchanged).
-
-A net can have at most one netsource. This falls out of the collision
-rule: a second netsource with the same name is rejected.
-
-#### Auto-naming UX
-
-When creating a **netsource**, the name is auto-generated in the
-standard way (`netsource1`, `netsource2`, …). The user typically
-renames it (e.g. `clk_net`) via the parameter editor before or after
-placement.
-
-When creating a **netsink**, the name defaults to `state.lastNetName`
-— the name of the most recently placed or renamed net device (source
-or sink). This means placing one netsource and then several netsinks
-gives them all the same name without manual renaming. The user can
-override the name in the parameter editor at any time; subsequent
-netsink placements then default to the overridden name.
-
-`lastNetName` is a transient UI hint — not saved in the file or in
-undo snapshots.
-
-#### Cascade Rename
-
-Renaming a **netsource** cascades to all netsinks that currently share
-the old name. The collision check uses the netsource's rules (must
-clear non-net devices and other netsources). Since the netsink rules
-are a subset, cascaded sinks are guaranteed safe. A single `pushUndo`
-before the cascade makes the entire operation one undo step.
-
-Renaming a **netsink** applies to that device only (no cascade). The
-netsink's color may change depending on whether the new name matches
-an existing netsource.
-
-#### Color Rendering
-
-Computed at render time by `netDeviceColor(d)`:
-
-* **netsink** — drawn in **red** (`NET_ORPHAN`) if no netsource shares
-  its name. Normal colour otherwise.
-* **netsource** — drawn in **yellow** (`NET_NOSRC`) if nothing is
-  connected to its `i0` input pin (`findWireAtInput` returns null).
-  Normal colour otherwise.
-
-The entire device (body, stubs, name label) takes the computed colour.
-Placing/moving ghosts use standard colours.
-
-Deleting a netsource causes all same-named netsinks to turn red
-automatically (no special delete handler needed — the render-time
-scan handles it).
-
-#### Wire Reference Disambiguation
-
-Wire objects reference source devices by name (`srcDev`) and pin
-(`srcPin`). Before Phase 5, device names were unique, so name alone
-was sufficient. With net devices sharing names, two levels of
-disambiguation are needed:
-
-**Level 1 — pin existence.** Different device types sharing a name
-(netsource vs netsink) are resolved by checking that the referenced
-pin exists in the device's `geo.pins` dictionary. Since netsource has
-only `i0` and netsink has only `o0`, this always resolves cross-type
-ambiguity. Used for `downstream.dev` lookups and `disconnectInputWires`.
-
-**Level 2 — source device position.** Same-type devices sharing a name
-(two netsinks both named "clk", both with pin `o0`) require position
-matching. Wires store `srcDevX`/`srcDevY` — the source device's
-position at wire creation time. Since devices with output wires cannot
-be moved, these remain valid for the wire's lifetime. The central
-helper `wireSrcMatchesDev(wire, device)` checks name + pin + position.
-Used by `findWireByOutput`, `getWireOrigin`, `deviceHasOutputWire`,
-`renameDevice`, and the context-menu wire-end handler.
-
-**Backward compatibility.** `srcDevX`/`srcDevY` are optional in the
-file format (no version bump). Old files have unique device names, so
-when these fields are absent, `wireSrcMatchesDev` falls back to
-name + pin matching, which is unambiguous for unique names.
-
-**Downstream references lack position fields.** Downstream segment
-endpoints store `{dev, pin}` only — no position. This is safe because
-the only same-name devices (netsource/netsink) have disjoint pin IDs,
-so Level 1 disambiguation always resolves them. If a future device type
-shares names AND input pin IDs, downstream references would need
-`dstDevX`/`dstDevY` fields paralleling the source side.
-
----
-
 ### Phase 6 — Export
 
 `.lsim` generation and `.svg` export.
@@ -765,52 +566,79 @@ red/yellow and floating wire yellow). The existing `_renderShapesSVG`
 and `_renderLabelsSVG` helpers can be reused. No validity checking
 needed for SVG.
 
+**Phase 6d - Misc:**
+* BUG: Localstorage not always working? Need details.
+* BUG: Save operation prompts after modification?
+* BUG: When right-click a device close to viewable edge,
+  some of the menu is off-screen.
+* Enh: Color floating input stubs yellow? Probably not.
+* Enh: Display device select canvas with "next device name"
+  displayed instead of device type.
+* Enh: Text boxes. Auto-size? Faint outline?
+* Chg: Log box at bottom: possible to put a frame around it?
+  Twice the width of a wire segment, same color as canvas.
+* Enh: re-write the test plan. Instead of being general statements of
+  "do these actions", it should be a list of functionality pulled from
+  the code itself that needs to be exercised. We're going for full code
+  coverage. The list will then be enhanced with test sequences that
+  exercise each functionality. There may be some sanity checks that are
+  impossible to fully exercise. Are there JS coverage analysis tools
+  available for a program+envronment like this?
+
+**Phease 6e - Self Test:**
+
+Is it feasible to create a "white box" self test module.
+I enision two soruce files, one called "with_test.js" and the other "no_test.js".
+They both declare a funcion that returns whether or not the tests are included.
+The main code would call that to determine if a "selfTest" menu item should be
+included.
+
+The build script would build two versions of the application: "ldraw.html" and "ldraw_test.html".
+The sed-based include method would be used to build them.
+
+Both files also contain a "beginTest" function.
+In "no_test.js" it simply returns.
+In "with_test.js" it initiates a unit test sequence.
+
+The idea is that it would be hard-coded to call event handlers with
+fake event data, and evaluate the contents of the internal state
+data when the event is processed.
+
+This would not do any visual testing of the GUI, only test that the
+event handlers update the internal state correctly.
+But this assumes the self test function has access to the internal state,
+which might violate encapsulation and data hiding rules.
+
+This approach needs discussion.
+
+The approach to coding must also be carefully considere.
+The instance of Claude writing the test code must not have access
+to the application code.
+Past experience has demonstrated that Claude simply writes tests to
+verify that the code does what it is written to do.
+This is fine if the code is "known good", but not good if the code
+might have bugs.
+
+Instead, a "clean room" approach must be taken where event handlers
+are described according to their intentended function,
+not their implementation.
+This produces a detailed document,
+which Claude then uses to design tests to verify intended function.
+
+Note that whereas the actual js code does not need to be reviewed,
+this detailed document should be reviewed to ensure that it
+doesn't simply detail what the code does, as-written.
+
+Also note that this could be a hell of a lot of work.
+Would it be worth the effort?
+
+Manual GUI testing should do a reasonable job.
+
 ---
 
-### Phase 7 — Move device with connected output wires (deferred)
+### Phase 7 — Incremental wire re-routing (related, also deferred)
 
-**Status:** Not yet implemented. Considered and scoped; implementation deferred.
-
-#### Motivation
-
-The current rule — a device with output wires may not be moved — is a blunt
-guard against accidental disconnection. It becomes an obstacle on complex
-drawings where the user needs to nudge a placed device after routing is done.
-
-#### Proposed behaviour
-
-When a device with output wires is moved:
-
-- The device and all output wire trees translate together as a rigid group.
-  All segments, waypoints, and branch points move by the same (dx, dy).
-- Input connections at the *far ends* of those wire trees (leaf segments
-  connected to other devices' input pins) are **broken** — those segment
-  endpoints become floating.
-- Input wires *into* the moved device are also broken, as they are today.
-
-The net effect: the moved device and its full output fan-out lift and
-re-land as a unit; only the connections to *other* devices' inputs are
-severed. The user re-routes those leaf connections after the move.
-
-#### Ghost rendering
-
-Ghosting the device body only (the current `state.moving.geo` path) is
-acceptable for a first implementation. Ghosting the full wire tree in
-translucent form would be a better UX but is a rendering addition on
-top of the data-model change.
-
-#### Why this is Phase 7 and not Phase Infinity
-
-The data-model work is straightforward: `finishMoving` needs to translate
-all `(endX, endY)` coordinates of segments in wires sourced by the moved
-device, and translate all `(x, y)` of their waypoints and branch points.
-The interference check can be skipped on move (same as today — the user
-is responsible for overlaps). The disconnection logic already exists.
-Estimated complexity: moderate.
-
-#### Incremental wire re-routing (related, also deferred)
-
-A lighter-weight variant was considered: after a small move, attempt to
+A lighter-weight variant of rubberband wires: after a small move, attempt to
 repair attached wire segments by adjusting segment lengths rather than
 breaking connections. The feasibility analysis concluded:
 
@@ -828,9 +656,6 @@ breaking connections. The feasibility analysis concluded:
   — some branches fit, others do not. Partial repair with selective
   breakage is significantly harder to specify and test than a clean
   break-everything approach.
-
-Conclusion: incremental re-routing is worth revisiting after Phase 7 is
-implemented, as a refinement on top of it. It should not gate Phase 7.
 
 ---
 
