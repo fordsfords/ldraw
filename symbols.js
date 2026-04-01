@@ -204,7 +204,7 @@ function ledGeometry(ox,oy,name,orientation){
   return{totalW,totalH,shapes,labels,pins,angle};
 }
 // SWITCH — radius=PIN_PITCH (20px)
-function swtchGeometry(ox,oy,name,orientation){
+function swtchGeometry(ox,oy,name,orientation,initialState){
   const radius=PIN_PITCH,totalW=radius*2+STUB,totalH=radius*2;
   const angles={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2};
   const angle=angles[orientation]??0,cos=Math.cos(angle),sin=Math.sin(angle);
@@ -213,31 +213,35 @@ function swtchGeometry(ox,oy,name,orientation){
   else{pivotX=ox+totalH/2;pivotY=oy+totalW/2;}
   function l2c(lx,ly){return _l2c(pivotX,pivotY,totalW,totalH,cos,sin,lx,ly);}
   const [ccx,ccy]=l2c(radius,radius);
+  const [isx,isy]=l2c(radius,radius+10); // initial state label position
   const [sx1,sy1]=l2c(radius*2,radius),[sx2,sy2]=l2c(radius*2+STUB,radius);
   const shapes=[{type:'circle',cx:ccx,cy:ccy,r:radius,lineWidth:1.5},{type:'line',x1:sx1,y1:sy1,x2:sx2,y2:sy2,lineWidth:1.5}];
-  const labels=[{x:ccx,y:ccy,text:name,kind:'name',align:'center'}];
+  const labels=[
+    {x:ccx,y:ccy-5,text:name,kind:'name',align:'center'},
+    {x:isx,y:isy,text:String(initialState||0),kind:'pin',align:'center'},
+  ];
   const pins={o0:{x:sx2,y:sy2,dir:_rotateDir('right',orientation)}};
   return{totalW,totalH,shapes,labels,pins,angle};
 }
-// GND — w=2*PIN_PITCH, no name label
+// GND — half-size triangle, name label below
 function gndGeometry(ox,oy,name){
-  const w=2*PIN_PITCH,h=PIN_PITCH,stubLen=PIN_PITCH,totalW=w,totalH=stubLen+h,cx=ox+totalW/2;
+  const w=PIN_PITCH,h=PIN_SPACE,stubLen=PIN_PITCH,totalW=w,totalH=stubLen+h,cx=ox+totalW/2;
   const shapes=[
     {type:'line',x1:cx,y1:oy,x2:cx,y2:oy+stubLen,lineWidth:1.5},
     {type:'polygon',points:[[ox,oy+stubLen],[ox+w,oy+stubLen],[cx,oy+stubLen+h]],lineWidth:1.5},
   ];
-  const labels=[];
+  const labels=[{x:cx,y:oy+totalH+8,text:name,kind:'name',align:'center'}];
   const pins={o0:{x:cx,y:oy,dir:'up'}};
   return{totalW,totalH,shapes,labels,pins};
 }
-// VCC — w=2*PIN_PITCH, no name label
+// VCC — half-size triangle, name label above
 function vccGeometry(ox,oy,name){
-  const w=2*PIN_PITCH,h=PIN_PITCH,stubLen=PIN_PITCH,totalW=w,totalH=stubLen+h,cx=ox+totalW/2;
+  const w=PIN_PITCH,h=PIN_SPACE,stubLen=PIN_PITCH,totalW=w,totalH=stubLen+h,cx=ox+totalW/2;
   const shapes=[
     {type:'line',x1:cx,y1:oy+totalH,x2:cx,y2:oy+h,lineWidth:1.5},
     {type:'polygon',points:[[ox,oy+h],[ox+w,oy+h],[cx,oy]],lineWidth:1.5},
   ];
-  const labels=[];
+  const labels=[{x:cx,y:oy-8,text:name,kind:'name',align:'center'}];
   const pins={o0:{x:cx,y:oy+totalH,dir:'down'}};
   return{totalW,totalH,shapes,labels,pins};
 }
@@ -453,9 +457,9 @@ function addwordGeometry(ox,oy,name,numBits,orientation){
 // NETSOURCE — "-->" style: shaft extends from pin all the way to arrow tip,
 // two wing lines go back from tip forming the ">" chevron.  No filled shape.
 // In right orientation: i0 pin at left, tip at right.
-// arrowH=40, arrowW=20, shaft+arrow span = totalW=40.
+// arrowH=20, arrowW=10, shaft+arrow span = totalW=30.
 function netsourceGeometry(ox,oy,name,orientation){
-  const arrowW=20,arrowH=40,totalW=STUB+arrowW,totalH=arrowH;
+  const arrowW=10,arrowH=20,totalW=STUB+arrowW,totalH=arrowH;
   const angles={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2};
   const angle=angles[orientation]??0,cos=Math.cos(angle),sin=Math.sin(angle);
   let pivotX,pivotY;
@@ -478,9 +482,9 @@ function netsourceGeometry(ox,oy,name,orientation){
   const pins={i0:{x:px,y:py,dir:_rotateDir('left',orientation)}};
   return{totalW,totalH,shapes,labels,pins,angle};
 }
-// NETSINK — chevH 20→40, chevW 16→20
+// NETSINK — half-size chevron (chevW=10, chevH=20)
 function netsinkGeometry(ox,oy,name,orientation){
-  const chevW=20,chevH=40,totalW=chevW+STUB,totalH=chevH;
+  const chevW=10,chevH=20,totalW=chevW+STUB,totalH=chevH;
   const angles={right:0,left:Math.PI,up:-Math.PI/2,down:Math.PI/2};
   const angle=angles[orientation]??0,cos=Math.cos(angle),sin=Math.sin(angle);
   let pivotX,pivotY;
@@ -506,7 +510,7 @@ function netsinkGeometry(ox,oy,name,orientation){
 const SYMBOL_FACTORIES={
   nand:      (ox,oy,name,params,orient)=>nandGeometry(ox,oy,name,orient,params.numInputs),
   led:       (ox,oy,name,params,orient)=>ledGeometry(ox,oy,name,orient),
-  swtch:     (ox,oy,name,params,orient)=>swtchGeometry(ox,oy,name,orient),
+  swtch:     (ox,oy,name,params,orient)=>swtchGeometry(ox,oy,name,orient,params.initialState),
   gnd:       (ox,oy,name)              =>gndGeometry(ox,oy,name),
   vcc:       (ox,oy,name)              =>vccGeometry(ox,oy,name),
   clk:       (ox,oy,name,params,orient)=>clkGeometry(ox,oy,name,orient),

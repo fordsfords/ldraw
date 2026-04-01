@@ -18,7 +18,7 @@ prev
 __pycache__
 
 # Executable
-ldraw.html
+a.out
 
 # Prerequisites
 *.d

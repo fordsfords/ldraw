@@ -49,7 +49,7 @@ These terms are used precisely throughout this document and in code comments.
   - All other overlap (device-device, device-wire, etc.) is the user's
     responsibility.
 * **Oops** — an error message in the log panel, prefixed with "Oops!"
-  and accompanied by an audible beep.
+  and accompanied by an audible beep. See Log Message Prefixes below.
 
 ---
 
@@ -77,10 +77,9 @@ producing the single-file `ldraw.html` that the browser opens.
 Uses the browser's File System Access API (Chrome):
 
 * **Read**: user selects a file via picker or drags and drops onto canvas.
-* **Write**: user selects destination via picker on first save; subsequent
-  saves reuse the writable handle obtained from the save picker (read-only
-  handles from the open picker are not reused for writing, as `file://`
-  does not permit it).
+* **Write**: "Save" reuses the writable handle from the last save picker;
+  "Save as…" always opens a new save picker. Read-only handles from the
+  open picker are not reused for writing, as `file://` does not permit it.
 
 The tool remembers the most recently used filename and directory.
 
@@ -94,9 +93,23 @@ The tool remembers the most recently used filename and directory.
   dialog).
 * **No backward compatibility.** When the data model changes, the `.ldraw`
   version number is incremented. No migration from older versions.
-* Error messages in the log panel prefixed with "Oops! ". Informational
-  messages appear without beep.
+* All log messages have a prefix — see Log Message Prefixes below.
 * Debug output goes to `console.log`.
+
+### Log Message Prefixes
+
+Every message written to the log panel starts with one of four prefixes:
+
+| Prefix | Meaning | Beep |
+|--------|---------|------|
+| `Yep.` | Informational — operation succeeded | no |
+| `Oops!` | Error — operation failed, not performed | yes |
+| `Um,` | Warning detail — something to review | no |
+| `Yo!` | Attention summary — aggregates warnings | yes |
+
+`Um,` warnings may appear in batches (e.g. during export). The `Yo!`
+summary at the end provides a single beep so the user knows to check
+the log. If there are no warnings, `Yep.` is used instead.
 
 ---
 
@@ -161,10 +174,49 @@ for the highest numeric suffix of each type.
 
 ## `.lsim` Output Format
 
-*(Phase 6 — not yet implemented.)*
+Exported via "Export .lsim…" in the canvas context menu. The output
+contains only `d` (define device) and `c` (connect) commands.
 
-See `circuit-language-docs.md` for the full format. The drawing tool will
-generate only structural commands: `d` (define device) and `c` (connect).
+### Device commands
+
+One `d` command per non-net device. Format varies by type:
+
+* No-param types (`gnd`, `vcc`, `led`, `clk`, `srlatch`, `dflipflop`,
+  `addbit`): `d;type;name;`
+* `swtch`: `d;swtch;name;initialState;` (0 or 1)
+* `nand`: `d;nand;name;numInputs;`
+* `mem`: `d;mem;name;numAddr;numData;`
+* `reg`, `panel`, `addword`: `d;type;name;numBits;`
+
+Net devices (`netsource`, `netsink`) are omitted — they are resolved
+into `c` commands.
+
+### Connect commands
+
+Each wire tree is flattened into hub-and-spokes `c` commands:
+`c;srcDev;srcPin;dstDev;dstPin;` — one per connected input pin.
+
+For named nets, `resolveNetSource(wire)` follows the chain: if a wire's
+source device is a netsink, it finds the matching netsource, then the
+wire driving that netsource's `i0`, and returns the real (non-net)
+driver. This recurses to handle chained nets, with a visited-set guard
+against circular references.
+
+### Validity warnings
+
+The export checks for three categories of problems, each reported as
+an `Um,` log message:
+
+* **Floating wire ends** — segments with `downstream.type === 'floating'`.
+* **Unconnected device input pins** — input pins with no wire attached
+  (checked via `findWireAtInput` for each non-output pin of each
+  non-net device).
+* **Orphaned nets** — netsinks with no matching netsource, or
+  netsources with nothing connected to their `i0`.
+
+Warnings do not block the export. The file is written with as much
+content as can be generated. If any warnings were produced, the summary
+uses `Yo!` (with beep); otherwise `Yep.`.
 
 ---
 
@@ -279,7 +331,7 @@ the same distance (`STUB = 20px`) from the device body edge.
 |------|-------|-------------|-----------|-------------|
 | `nand` | NAND | right/left/up/down | — | `numInputs` (1–16) |
 | `led` | LED | right/left/up/down | — | — |
-| `swtch` | Switch | right/left/up/down | — | — |
+| `swtch` | Switch | right/left/up/down | — | `initialState` (0–1) |
 | `gnd` | GND | fixed (down) | yes | — |
 | `vcc` | VCC | fixed (up) | yes | — |
 | `clk` | Clock | right/left | yes | — |
@@ -294,10 +346,19 @@ the same distance (`STUB = 20px`) from the device body edge.
 | `netsink` | Net Sink | right/left/up/down | — | — |
 
 Singleton devices are greyed out in the selection view once one exists.
-`gnd` and `vcc` do not display their instance name.
+
+`gnd` and `vcc` use half-size triangles and display their instance name
+(below the triangle for gnd, above for vcc).
+
+`netsource` and `netsink` use half-size arrow/chevron symbols.
+
+Switch displays `initialState` (0 or 1) inside the circle below the
+device name. Configurable in the selection-view parameter editor and
+togglable after placement via device context menu → "Toggle initial
+state".
 
 Per-device pin assignments and geometry notes are documented in block
-comments above each geometry function in `ldraw.html`.
+comments above each geometry function in `symbols.js`.
 
 ### Extensibility
 
@@ -352,6 +413,13 @@ on the drawing coordinate system or hit testing.
 (no inline edit fields). Editing operations (rename, drawing name) open
 separate durable modal dialogs with OK/Cancel. This avoids mixed-mode
 problems (e.g. editing a name then clicking "delete" in the same menu).
+
+**Device orientation change.** The device context menu includes an
+"Orientation ▸" submenu for devices with multiple orientations.
+Directions not supported by the device type are greyed out, as is the
+current orientation. Same rules as move/delete: blocked if the device
+has output wires; input wires are disconnected. Fixed-orientation
+devices (`gnd`, `vcc`) have no submenu.
 
 **Undo.** Deep-copy snapshots. Geo objects shared (not copied) because
 they are immutable after creation and recomputed on restore. Unbounded
@@ -679,6 +747,18 @@ shares names AND input pin IDs, downstream references would need
 
 ### Phase 6 — Export
 
-`.lsim` generation and `.svg` export. See `circuit-language-docs.md` for
-the `.lsim` format. The SVG viewBox is bounded by the outermost device
-and wire bounding boxes plus a 2-unit margin.
+`.lsim` generation and `.svg` export.
+
+**Phase 6a — Misc:** Complete. Half-size gnd/vcc triangles with name
+labels, half-size netsource/netsink arrows, "Save as…" menu item,
+switch `initialState` parameter, device orientation change from context
+menu, log message prefix system (Yep/Oops/Um/Yo).
+
+**Phase 6b — .lsim export:** Complete. See `.lsim` Output Format above.
+
+**Phase 6c — .svg export:** Not yet implemented. The SVG viewBox should
+be bounded by the outermost device and wire bounding boxes plus a
+2-unit margin. All colours should be reproduced (including net device
+red/yellow and floating wire yellow). The existing `_renderShapesSVG`
+and `_renderLabelsSVG` helpers can be reused. No validity checking
+needed for SVG.

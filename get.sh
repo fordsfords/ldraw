@@ -33,3 +33,5 @@ for REPO in $HOME/sford/Downloads/ldraw*.b64; do :
     mv_repo "$F"
   fi
 done
+
+./build.sh
