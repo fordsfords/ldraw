@@ -25,8 +25,6 @@ so even if it is buggy, it shouldn't be able to damage anything.
 
 ## Quick Start
 
-Run `./build.sh` to produce `ldraw.html`, then open it in Chrome.
-
 Right-click on empty canvas to access drawing commands: add devices, load/save
 files, pan to coordinates, undo.
 
