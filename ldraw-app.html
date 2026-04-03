@@ -1453,7 +1453,7 @@ function generateLsimDCmd(d){
 // Returns {dev,pin} or null if the chain is broken.
 function resolveNetSource(wire,visited){
   if(!visited)visited=new Set();
-  if(visited.has(wire.id)){logMsg(LogLevel.WARN,'Circular named-net reference detected.');return null;}
+  if(visited.has(wire.id)){logMsg(LogLevel.ALERT,'Circular named-net reference detected.');return null;}
   visited.add(wire.id);
   const srcDev=state.devices.find(d=>wireSrcMatchesDev(wire,d));
   if(!srcDev)return null;

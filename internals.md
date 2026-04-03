@@ -89,8 +89,14 @@ These terms are used precisely throughout this document and in code comments.
     collinear run.
   - All other overlap (device-device, device-wire, etc.) is the user's
     responsibility.
-* **Oops** — an error log message (level `ERROR`). Accompanied by an
-  audible beep. See Log Message Prefixes below.
+* **Yep.** - Prefix for a log message (level `INFO`), meaning the requested operation succeeded. Silent.
+  Silent.
+* **Yo!** - Prefix for a log message (level `ALERT`), meaning the requested operation succeeded but with a warning.
+  Accompanied by an audible beep.
+* **Oops!** — Prefix for a log message (level `ERROR`), meaning the requested operation failed. Accompanied by an
+  audible beep.
+* **Um.** - Prefix for a log message (level `WARN`), meaning the requested operation succeeded but with a warning.
+  Silent.
 
 ---
 
@@ -147,13 +153,19 @@ prefix prepended to `msg` and whether a beep is emitted:
 | `LogLevel` | Prefix | Meaning | Beep |
 |------------|--------|---------|------|
 | `INFO`  | `Yep. ` | Informational — operation succeeded | no |
+| `ALERT` | `Yo! ` | Warning - operation succeeded but with problems | yes |
 | `ERROR` | `Oops! ` | Error — operation failed, not performed | yes |
-| `WARN`  | `Um. ` | Warning detail — something to review | no |
-| `ALERT` | `Yo! ` | Attention summary — aggregates warnings | yes |
+| `WARN`  | `Um. ` | Silent warning — operation succeeded but with a problem | no |
 
-`WARN` messages may appear in batches (e.g. during export). The `ALERT`
+In most cases, `ALERT` should be used for warnings, since they deserve
+attention.
+However, in some cases (like an export) a requested operation might generate several
+warnings in a row, and multiple beeps can be annoying. In those cases,
+`WARN` messages may appear in batches and the `ALERT`
 summary at the end provides a single beep so the user knows to check
-the log. If there are no warnings, `INFO` is used instead.
+the log.
+
+If there are no warnings, `INFO` is used instead to verify the operation.
 
 ---
 

@@ -91,10 +91,14 @@ window. Each message is prefixed according to its severity:
 
 | Prefix | Meaning |
 |--------|---------|
-| `Yep. ` | Operation succeeded |
-| `Um. `  | Warning — operation succeeded but might not be what you want |
-| `Yo! `  | Attention — operation succeeded but you need to see this (accompanied by a beep) |
+| `Yep. ` | FYI - Operation succeeded |
+| `Yo! `  | Warning — operation succeeded but you need to see this (accompanied by a beep) |
 | `Oops! ` | Error — operation failed (accompanied by a beep) |
+| `Um. `  | Silent warning — operation succeeded but you need to see this (no beep) |
+
+The purpose of "Um" is if a requested operation (like an export) might generate multiple warnings,
+it would be annoying if each one included a beep. So the code can use "Um" for any warnings,
+and then include a "Yo" at the end to attract your attention.
 
 ## Status
 
