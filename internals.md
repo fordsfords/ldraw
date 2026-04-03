@@ -448,7 +448,7 @@ to aid visual alignment.
 
 **Status bar.** A 20px opaque white bar at the top of the normal view,
 drawn last (on top of drawing content). Left side shows drawing name,
-dirty indicator, and hash; right side shows pan coordinates.
+dirty indicator, hash; right side shows pan coordinates.
 Painted in screen space after resetting the canvas transform — no effect
 on the drawing coordinate system or hit testing.
 
@@ -552,43 +552,62 @@ rename. Linear scan is fine for any realistic device count.
 
 `.lsim` generation and `.svg` export.
 
-**Phase 6a — Misc:** Complete. Half-size gnd/vcc triangles with name
+#### Phase 6a — Misc
+**Complete.** Half-size gnd/vcc triangles with name
 labels, half-size netsource/netsink arrows, "Save as…" menu item,
 switch `initialState` parameter, device orientation change from context
 menu, log message prefix system (LogLevel enum: INFO/ERROR/WARN/ALERT).
 
-**Phase 6b — .lsim export:** Complete. See `.lsim` Output Format above.
+#### Phase 6b — .lsim export:
+**Complete.** See `.lsim` Output Format above.
 
-**Phase 6c — .svg export:** Not yet implemented. The SVG viewBox should
+#### Phase 6c — .svg export
+Not yet implemented. The SVG viewBox should
 be bounded by the outermost device and wire bounding boxes plus a
 2-unit margin. All colours should be reproduced (including net device
 red/yellow and floating wire yellow). The existing `_renderShapesSVG`
 and `_renderLabelsSVG` helpers can be reused. No validity checking
 needed for SVG.
 
-**Phase 6d - Misc:**
-* BUG: Localstorage not always working? Need details.
-* BUG: Save operation prompts after modification?
-* BUG: When right-click a device close to viewable edge,
-  some of the menu is off-screen.
-* Enh: Color floating input stubs yellow? Probably not.
-* Enh: Display device select canvas with "next device name"
-  displayed instead of device type.
-* Enh: Text boxes. Auto-size? Faint outline?
-* Chg: Log box at bottom: possible to put a frame around it?
-  Twice the width of a wire segment, same color as canvas.
-* Enh: re-write the test plan. Instead of being general statements of
-  "do these actions", it should be a list of functionality pulled from
-  the code itself that needs to be exercised. We're going for full code
-  coverage. The list will then be enhanced with test sequences that
-  exercise each functionality. There may be some sanity checks that are
-  impossible to fully exercise. Are there JS coverage analysis tools
-  available for a program+envronment like this?
+### Phase 7 - Misc
 
-**Phease 6e - Self Test:**
+None of these are "must haves", including the bugs. Evaluate how much it
+impacts maintainability (complexity).
 
-Is it feasible to create a "white box" self test module.
-I enision two soruce files, one called "with_test.js" and the other "no_test.js".
+1. BUG: Load drawing. Make minor modification. Save. Reload page. Load drawing.
+   The starting path is not saved. Isn't localstorage supposed to save that?
+2. BUG: Load drawing. Make minor modification. Save. It launches file picker.
+   Can load prep to be able to save without picker? Maybe open for update
+   so that it can write later on?
+3. BUG: When right-click a device close to the bottom viewable edge,
+   some of the menu is off-screen.
+4. Enh: Maybe color floating device input stubs yellow?
+5. Enh: Display device select canvas with next auto device name
+   displayed as the name. Currently dispays the device type, which
+   is already displayed at the bottom of the selector box.
+6. Enh: Text boxes. Auto-size? Faint outline?
+7. Chg: Log box at bottom: possible to put a frame around it?
+   Twice the width of a wire segment, same color as canvas.
+8. Question: should the file path name also to be displayed on the status line?
+   Since it no longer has a strong tie to the drawing name, it might be good.
+9. Enh: add the status line information to .lsim (as comment) and .svg
+   (increase the height of the drawing to accommodate the status line).
+
+### Phase 8 - Re-Size
+
+1. Enh: Allow re-sizing of non-leaf wire segments.
+   When left-click on a waypoint, you enter resize mode of
+   the segment whose downstream end is attached to the waypoint.
+   Note that this will disconnect everything downstream from
+   device inputs.
+   When resizing, ideally it would ghost the entire downstream wire tree,
+   but it would be acceptable for the downstream to disappear during the
+   resize and only reappear when the waypoint is released.
+
+### Phase 9 - Self Test
+
+Is it feasible to create a "white box" self test module?
+I enision two soruce files, one called "self_test.js" and the other "no_test.js".
 They both declare a funcion that returns whether or not the tests are included.
 The main code would call that to determine if a "selfTest" menu item should be
 included.
@@ -598,7 +617,7 @@ The sed-based include method would be used to build them.
 
 Both files also contain a "beginTest" function.
 In "no_test.js" it simply returns.
-In "with_test.js" it initiates a unit test sequence.
+In "self_test.js" it initiates a unit test sequence.
 
 The idea is that it would be hard-coded to call event handlers with
 fake event data, and evaluate the contents of the internal state
@@ -634,13 +653,24 @@ Would it be worth the effort?
 
 Manual GUI testing should do a reasonable job.
 
----
+### Phase 10 — Incremental wire re-routing
 
-### Phase 7 — Incremental wire re-routing (related, also deferred)
+Goal is to allow small changes in device position without breaking
+connections.
 
-A lighter-weight variant of rubberband wires: after a small move, attempt to
-repair attached wire segments by adjusting segment lengths rather than
-breaking connections. The feasibility analysis concluded:
+A lighter-weight variant of rubberband wires: Allow movement of a device. 
+As before, it breaks input connections. Can those connections be "repaired"
+by expanding or contracting existing line segments?
+Maybe starting with leaf segments and working your way back?
+Never contract a segment smaller than 1 unit, do not insert new
+waypoints, do not change orientation of existing waypoints.
+If the new device position is such that it would require "negative"
+segment lengths, snap to the original position and print a "Yo. "
+(It's not an error because the device was successfully moved,
+but the wires could not be automatically re-routed).
+
+Branch points are harder to include in this.
+Perhaps consider them immovable.
 
 - **Common case is tractable.** For a simple L-shaped or Z-shaped wire,
   only the segment(s) adjacent to the moved pin need to change length.
@@ -656,8 +686,6 @@ breaking connections. The feasibility analysis concluded:
   — some branches fit, others do not. Partial repair with selective
   breakage is significantly harder to specify and test than a clean
   break-everything approach.
-
----
 
 ### Phase Infinity — Lasso select and group move
 
@@ -694,6 +722,3 @@ requires per-device membership testing for both `srcDev` and all
 This is a qualitatively larger feature than any phase implemented to date,
 and the usability payoff does not justify the implementation cost at this
 stage of the project.
-
-Prerequisite: Phase 7 (move with output wires) should be implemented first,
-since group move depends on single-device-move-with-wires working cleanly.
