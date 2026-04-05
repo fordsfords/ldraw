@@ -2,8 +2,8 @@
 // SYMBOL LIBRARY
 // Pin-to-grid guarantee: with ox/oy snapped to PIN_SPACE multiples, every
 // pin tip also lands on a PIN_SPACE multiple.
-//   STUB   = PIN_SPACE     = 20  (plain stub)
-//   BUBBLE = PIN_SPACE / 2 = 10  (inversion bubble; effective reach = STUB+2*BUBBLE = 40)
+//   STUB   = PIN_PITCH     = 20  (plain stub)
+//   BUBBLE = PIN_SPACE / 2 =  5  (inversion bubble radius; effective reach = STUB = 20)
 // Box widths/heights are multiples of PIN_SPACE.
 // NAND internal pitch = 2*PIN_SPACE so arc centre is always on grid.
 // =============================================================================

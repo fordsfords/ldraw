@@ -13,7 +13,7 @@ mkdir /tmp/ldraw-temp
 base64 -d /tmp/ldraw-repo.tz.b64 | ( cd /tmp/ldraw-temp; tar xzf - )
 ( cd /tmp/ldraw-temp; git checkout . )
 
-git fetch /tmp/ldraw-temp main:claude-main
+git fetch /tmp/ldraw-temp main:claude-main --force
 cat <<__EOF__
 
 When ready, do: git merge claude-main

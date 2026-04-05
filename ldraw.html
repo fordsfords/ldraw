@@ -165,8 +165,8 @@ html, body { width:100%; height:100%; overflow:hidden; background:#e8e6df; font-
 // SYMBOL LIBRARY
 // Pin-to-grid guarantee: with ox/oy snapped to PIN_SPACE multiples, every
 // pin tip also lands on a PIN_SPACE multiple.
-//   STUB   = PIN_SPACE     = 20  (plain stub)
-//   BUBBLE = PIN_SPACE / 2 = 10  (inversion bubble; effective reach = STUB+2*BUBBLE = 40)
+//   STUB   = PIN_PITCH     = 20  (plain stub)
+//   BUBBLE = PIN_SPACE / 2 =  5  (inversion bubble radius; effective reach = STUB = 20)
 // Box widths/heights are multiples of PIN_SPACE.
 // NAND internal pitch = 2*PIN_SPACE so arc centre is always on grid.
 // =============================================================================
@@ -2066,6 +2066,7 @@ async function exportLsim(){
     if(state.lastHandle)opts.startIn=state.lastHandle;
     const h=await window.showSaveFilePicker(opts);
     const w=await h.createWritable();await w.write(text);await w.close();
+    state.lastHandle=h;
     const nD=text.split('\n').filter(l=>l.startsWith('d;')).length;
     const nC=text.split('\n').filter(l=>l.startsWith('c;')).length;
     if(warnings.length>0){
@@ -2139,6 +2140,7 @@ async function exportSvg(){
     if(state.lastHandle)opts.startIn=state.lastHandle;
     const h=await window.showSaveFilePicker(opts);
     const w=await h.createWritable();await w.write(text);await w.close();
+    state.lastHandle=h;
     logMsg(LogLevel.INFO,`Exported ${h.name}`);
   }catch(e){
     if(e.name!=='AbortError')logMsg(LogLevel.ERROR,'SVG export error: '+e.message);

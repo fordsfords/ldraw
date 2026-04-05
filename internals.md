@@ -92,7 +92,6 @@ These terms are used precisely throughout this document and in code comments.
   - All other overlap (device-device, device-wire, etc.) is the user's
     responsibility.
 * **Yep.** - Prefix for a log message (level `INFO`), meaning the requested operation succeeded. Silent.
-  Silent.
 * **Yo!** - Prefix for a log message (level `ALERT`), meaning the requested operation succeeded but with a warning.
   Accompanied by an audible beep.
 * **Oops!** — Prefix for a log message (level `ERROR`), meaning the requested operation failed. Accompanied by an
@@ -214,7 +213,8 @@ Pretty-printed JSON. Current version: **4**.
 ```
 
 `x` and `y` are the `(ox, oy)` origin passed to the device's geometry
-function, in multiples of `PIN_SPACE`.
+function, in canvas pixels (always a multiple of `PIN_SPACE` due to snapping,
+but stored as the raw pixel value, not a grid-step count).
 
 The upstream end position of a segment is derived at load time from the
 source pin's geometry (for the root segment) or from the waypoint/branch
@@ -413,6 +413,9 @@ Switch displays `initialState` (0 or 1) inside the circle below the
 device name. Configurable in the selection-view parameter editor and
 togglable after placement via device context menu → "Toggle initial
 state".
+
+`addbit` has no separate geometry function — it delegates to
+`addwordGeometry(ox, oy, name, 1, orient)` (i.e., a 1-bit addword).
 
 Per-device pin assignments and geometry notes are documented in block
 comments above each geometry function in `symbols.js`.
