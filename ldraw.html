@@ -20,7 +20,7 @@ html, body { width:100%; height:100%; overflow:hidden; background:#e8e6df; font-
 #canvas { display:block; cursor:default; }
 #logPanel {
   position:fixed; bottom:0; left:0; right:0; height:44px;
-  background:#141412; border-top:1px solid #555; overflow-y:auto;
+  background:#141412; border:8px solid #e8e6df; border-top:none; overflow-y:auto;
   font-family:monospace; font-size:11px; color:#9fba8f; padding:2px 6px;
   z-index:5; user-select:text;
 }
@@ -70,6 +70,7 @@ html, body { width:100%; height:100%; overflow:hidden; background:#e8e6df; font-
     <div class="ctx-item" id="ctx-save-as">Save as…</div>
     <div class="ctx-sep"></div>
     <div class="ctx-item" id="ctx-export-lsim">Export .lsim…</div>
+    <div class="ctx-item" id="ctx-export-svg">Export .svg…</div>
     <div class="ctx-sep"></div>
     <div class="ctx-item" id="ctx-undo">Undo</div>
     <div class="ctx-sep"></div>
@@ -228,7 +229,7 @@ function _renderShapesSVG(shapes,fg,bg){
 }
 function _renderLabelsCanvas(ctx,labels,fg,mid){
   for(const l of labels){
-    ctx.fillStyle=l.kind==='name'?fg:mid;
+    ctx.fillStyle=fg;
     ctx.font=l.kind==='name'?'bold 11px sans-serif':'10px sans-serif';
     ctx.textAlign=l.align||'center';ctx.textBaseline='middle';
     ctx.fillText(l.text,l.x,l.y);
@@ -236,7 +237,7 @@ function _renderLabelsCanvas(ctx,labels,fg,mid){
 }
 function _renderLabelsSVG(labels,fg,mid){
   return labels.map(l=>{
-    const fill=l.kind==='name'?fg:mid,weight=l.kind==='name'?'bold':'normal',size=l.kind==='name'?11:10;
+    const fill=fg,weight=l.kind==='name'?'bold':'normal',size=l.kind==='name'?11:10;
     const anchor=l.align==='left'?'start':l.align==='right'?'end':'middle';
     return `<text x="${_p(l.x)}" y="${_p(l.y)}" font-family="sans-serif" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}" dominant-baseline="central">${l.text}</text>`;
   });
@@ -1647,7 +1648,10 @@ function renderSelectionView(){
     ctx.fillRect(it.cellX,it.cellY,it.cellW,it.cellH);ctx.strokeRect(it.cellX,it.cellY,it.cellW,it.cellH);
     ctx.save();ctx.translate(it.drawOffX,it.drawOffY);
     if(grey)ctx.globalAlpha=0.35;
-    renderDevice(ctx,it.type,it.geo,SYM_FG,SYM_MID,SYM_BG);
+    const cfg=getSelCfg(it.type);
+    const previewName=getSelCfg(it.type).nextName||previewNextName(it.type);
+    const liveGeo=makeGeo(it.type,0,0,previewName,cfg.params,cfg.orientation);
+    renderDevice(ctx,it.type,liveGeo,SYM_FG,SYM_MID,SYM_BG);
     ctx.restore();
     ctx.fillStyle=grey?'#999':'#333';ctx.font='12px sans-serif';
     ctx.textAlign='center';ctx.textBaseline='middle';
@@ -2000,6 +2004,9 @@ function resolveNetSource(wire,visited){
 function generateLsim(){
   const lines=[];
   const warnings=[];
+  // Status comment
+  const hashStr=state.drawingHash.toString(16).toUpperCase().padStart(8,'0');
+  lines.push(`# ${state.drawingName}  #${hashStr}`);
   // d commands
   for(const d of state.devices){
     if(d.type==='netsource'||d.type==='netsink')continue;
@@ -2071,6 +2078,73 @@ async function exportLsim(){
   }
 }
 
+// --- .svg export ---
+function generateSvg(){
+  const MARGIN=2*PIN_SPACE;
+  const STATUS_H=20;
+  // Compute bounding box over all devices and wire endpoints
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  function e(x,y){if(x<minX)minX=x;if(y<minY)minY=y;if(x>maxX)maxX=x;if(y>maxY)maxY=y;}
+  for(const d of state.devices){
+    const b=computeDeviceBounds(d.geo);
+    e(b.minX,b.minY);e(b.maxX,b.maxY);
+  }
+  for(const w of state.wires){
+    for(const seg of w.segments){
+      const start=getSegStart(w,seg);
+      e(start.x,start.y);e(seg.endX,seg.endY);
+    }
+    for(const bp of w.branchPoints)e(bp.x,bp.y);
+  }
+  if(minX===Infinity){minX=0;minY=0;maxX=0;maxY=0;}
+  minX-=MARGIN;minY-=MARGIN;maxX+=MARGIN;maxY+=MARGIN;
+  // Expand upward for status line
+  const svgMinY=minY-STATUS_H;
+  const W=maxX-minX,H=(maxY-minY)+STATUS_H;
+  const lines=[];
+  lines.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${_p(minX)} ${_p(svgMinY)} ${_p(W)} ${_p(H)}" width="${_p(W)}" height="${_p(H)}">`);
+  // Background
+  lines.push(`<rect x="${_p(minX)}" y="${_p(svgMinY)}" width="${_p(W)}" height="${_p(H)}" fill="white"/>`);
+  // Status line text
+  const hashStr=state.drawingHash.toString(16).toUpperCase().padStart(8,'0');
+  const statusText=`${state.drawingName}  #${hashStr}`;
+  lines.push(`<text x="${_p(minX+8)}" y="${_p(svgMinY+STATUS_H/2)}" font-family="monospace" font-size="11" fill="#000000" dominant-baseline="central">${statusText}</text>`);
+  // Devices
+  for(const d of state.devices){
+    const fg=(d.type==='netsource'||d.type==='netsink')?netDeviceColor(d):SYM_FG;
+    const renderer=SVG_RENDERERS[d.type]||_defaultRenderSVG;
+    lines.push(renderer(d.geo,fg,SYM_MID,'white'));
+  }
+  // Wires
+  for(const w of state.wires){
+    for(const seg of w.segments){
+      const start=getSegStart(w,seg);
+      const color=seg.downstream.type==='floating'?'#cc9900':'#222';
+      lines.push(`<line x1="${_p(start.x)}" y1="${_p(start.y)}" x2="${_p(seg.endX)}" y2="${_p(seg.endY)}" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>`);
+    }
+    for(const bp of w.branchPoints){
+      lines.push(`<circle cx="${_p(bp.x)}" cy="${_p(bp.y)}" r="3" fill="#222"/>`);
+    }
+  }
+  lines.push('</svg>');
+  return lines.join('\n');
+}
+async function exportSvg(){
+  try{
+    const text=generateSvg();
+    const opts={
+      suggestedName:state.drawingName+'.svg',
+      types:[{description:'SVG files',accept:{'image/svg+xml':['.svg']}}],
+    };
+    if(state.lastHandle)opts.startIn=state.lastHandle;
+    const h=await window.showSaveFilePicker(opts);
+    const w=await h.createWritable();await w.write(text);await w.close();
+    logMsg(LogLevel.INFO,`Exported ${h.name}`);
+  }catch(e){
+    if(e.name!=='AbortError')logMsg(LogLevel.ERROR,'SVG export error: '+e.message);
+  }
+}
+
 // --- Parameter editor ---
 let ppType=null;
 function _escAttr(s){return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -2128,6 +2202,9 @@ function hidePP(){paramPopup.removeEventListener('keydown',ppKeyHandler);paramPo
 function showCtxMenu(sx,sy){
   ctxMenu.style.left=sx+'px';ctxMenu.style.top=sy+'px';
   ctxMenu.style.display='block';
+  const r=ctxMenu.getBoundingClientRect();
+  if(r.bottom>window.innerHeight)ctxMenu.style.top=Math.max(0,sy-(r.bottom-window.innerHeight))+'px';
+  if(r.right>window.innerWidth)ctxMenu.style.left=Math.max(0,sx-(r.right-window.innerWidth))+'px';
 }
 const CTX_SECTIONS=[ctxCanvas,ctxDevice,ctxPin,ctxWaypoint,ctxBranchPoint,ctxSegment];
 function showCtxSection(section){
@@ -2314,6 +2391,7 @@ document.getElementById('ctx-load').addEventListener('click',()=>{hideCtxMenu();
 document.getElementById('ctx-save').addEventListener('click',()=>{hideCtxMenu();saveLdraw();});
 document.getElementById('ctx-save-as').addEventListener('click',()=>{hideCtxMenu();saveLdraw(true);});
 document.getElementById('ctx-export-lsim').addEventListener('click',()=>{hideCtxMenu();exportLsim();});
+document.getElementById('ctx-export-svg').addEventListener('click',()=>{hideCtxMenu();exportSvg();});
 document.getElementById('ctx-redraw').addEventListener('click',()=>{hideCtxMenu();render();});
 document.getElementById('ctx-undo').addEventListener('click',()=>{
   hideCtxMenu();popUndo();

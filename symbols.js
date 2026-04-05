@@ -66,7 +66,7 @@ function _renderShapesSVG(shapes,fg,bg){
 }
 function _renderLabelsCanvas(ctx,labels,fg,mid){
   for(const l of labels){
-    ctx.fillStyle=l.kind==='name'?fg:mid;
+    ctx.fillStyle=fg;
     ctx.font=l.kind==='name'?'bold 11px sans-serif':'10px sans-serif';
     ctx.textAlign=l.align||'center';ctx.textBaseline='middle';
     ctx.fillText(l.text,l.x,l.y);
@@ -74,7 +74,7 @@ function _renderLabelsCanvas(ctx,labels,fg,mid){
 }
 function _renderLabelsSVG(labels,fg,mid){
   return labels.map(l=>{
-    const fill=l.kind==='name'?fg:mid,weight=l.kind==='name'?'bold':'normal',size=l.kind==='name'?11:10;
+    const fill=fg,weight=l.kind==='name'?'bold':'normal',size=l.kind==='name'?11:10;
     const anchor=l.align==='left'?'start':l.align==='right'?'end':'middle';
     return `<text x="${_p(l.x)}" y="${_p(l.y)}" font-family="sans-serif" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}" dominant-baseline="central">${l.text}</text>`;
   });

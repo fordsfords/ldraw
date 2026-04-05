@@ -37,8 +37,10 @@ use to a future maintainer, be they human or AI.
 &nbsp;&nbsp;&nbsp;&nbsp;&bull; [Known Quirks](#known-quirks)  
 &nbsp;&nbsp;&nbsp;&nbsp;&bull; [Known Inefficiencies](#known-inefficiencies)  
 &nbsp;&nbsp;&nbsp;&nbsp;&bull; [Future Work](#future-work)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Phase 6 — Export](#phase-6--export)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Phase 7 — Incremental wire re-routing (related, also deferred)](#phase-7--incremental-wire-re-routing-related-also-deferred)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Phase 7 - Misc](#phase-7---misc)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Phase 8 - Re-Size](#phase-8---re-size)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Phase 9 - Self Test](#phase-9---self-test)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Phase 10 — Incremental wire re-routing](#phase-10--incremental-wire-re-routing)  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Phase Infinity — Lasso select and group move](#phase-infinity--lasso-select-and-group-move)  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Concept](#concept)  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Open design questions (unresolved)](#open-design-questions-unresolved)  
@@ -560,27 +562,6 @@ rename. Linear scan is fine for any realistic device count.
 
 ## Future Work
 
-### Phase 6 — Export
-
-`.lsim` generation and `.svg` export.
-
-#### Phase 6a — Misc
-**Complete.** Half-size gnd/vcc triangles with name
-labels, half-size netsource/netsink arrows, "Save as…" menu item,
-switch `initialState` parameter, device orientation change from context
-menu, log message prefix system (LogLevel enum: INFO/ERROR/WARN/ALERT).
-
-#### Phase 6b — .lsim export:
-**Complete.** See `.lsim` Output Format above.
-
-#### Phase 6c — .svg export
-Not yet implemented. The SVG viewBox should
-be bounded by the outermost device and wire bounding boxes plus a
-2-unit margin. All colours should be reproduced (including net device
-red/yellow and floating wire yellow). The existing `_renderShapesSVG`
-and `_renderLabelsSVG` helpers can be reused. No validity checking
-needed for SVG.
-
 ### Phase 7 - Misc
 
 None of these are "must haves", including the bugs. Evaluate how much it
@@ -591,19 +572,10 @@ impacts maintainability (complexity).
 2. BUG: Load drawing. Make minor modification. Save. It launches file picker.
    Can load prep to be able to save without picker? Maybe open for update
    so that it can write later on?
-3. BUG: When right-click a device close to the bottom viewable edge,
-   some of the menu is off-screen.
-4. Enh: Maybe color floating device input stubs yellow?
-5. Enh: Display device select canvas with next auto device name
-   displayed as the name. Currently dispays the device type, which
-   is already displayed at the bottom of the selector box.
-6. Enh: Text boxes. Auto-size? Faint outline?
-7. Chg: Log box at bottom: possible to put a frame around it?
-   Twice the width of a wire segment, same color as canvas.
-8. Question: should the file path name also to be displayed on the status line?
+3. Enh: Maybe color floating device input stubs yellow?
+4. Enh: Text boxes. Auto-size? Faint outline?
+5. Question: should the file path name also to be displayed on the status line?
    Since it no longer has a strong tie to the drawing name, it might be good.
-9. Enh: add the status line information to .lsim (as comment) and .svg
-   (increase the height of the drawing to accommodate the status line).
 
 ### Phase 8 - Re-Size
 

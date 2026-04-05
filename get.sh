@@ -1,37 +1,21 @@
 #/bin/bash
 
-mv_repo() {
-  F="$1"
-  BASE="${F%%.*}"  # strip everything past the first dot.
-  I=0
-  while [ -f "prev/$BASE.tz ($I).b64" ]; do
-    I=$((I + 1))
-  done
-  echo mv "$HOME/sford/Downloads/$F" "prev/$BASE.tz ($I).b64"
-  mv "$HOME/sford/Downloads/$F" "prev/$BASE.tz ($I).b64"
-}
-
-if [ ! -d prev ]; then :
-  mkdir prev
+if [ ! -f ~/sford/Downloads/ldraw-repo.tz.b64 ]; then :
+  echo "Not found: ~/sford/Downloads/ldraw-repo.tz.b64"
+  exit 1
 fi
-# Copy regular files.
-for F in *; do :
-  if [ -f "$HOME/sford/Downloads/$F" ]; then :
-    echo $F
-    mv "$F" prev/
-    mv "$HOME/sford/Downloads/$F" .
-  fi
-done
 
-# Copy repo files
-if [ -f "$HOME/sford/Downloads/ldraw-repo.tz.b64" ]; then :
-  mv_repo "ldraw-repo.tz.b64"
-fi
-for REPO in $HOME/sford/Downloads/ldraw*.b64; do :
-  if [ -f "$REPO" ]; then :
-    F=`basename "$REPO"`
-    mv_repo "$F"
-  fi
-done
+echo "Getting Claude's changes into branch 'claude-main'"
+mv ~/sford/Downloads/ldraw-repo.tz.b64 /tmp
+rm -rf /tmp/ldraw-temp
+mkdir /tmp/ldraw-temp
 
-./build.sh
+base64 -d /tmp/ldraw-repo.tz.b64 | ( cd /tmp/ldraw-temp; tar xzf - )
+( cd /tmp/ldraw-temp; git checkout . )
+
+git fetch /tmp/ldraw-temp main:claude-main
+cat <<__EOF__
+
+When ready, do: git merge claude-main
+Then can do: git branch -d claude-main
+__EOF__
