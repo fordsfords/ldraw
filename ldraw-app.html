@@ -1434,6 +1434,20 @@ function handleFileDrop(file){
   r.readAsText(file);
 }
 
+// --- Export helpers ---
+// Returns the stem (no extension) to use for suggested export filenames.
+// Derived from the loaded filename (state.lastName) so that a file loaded as
+// "seq1-new.ldraw" exports as "seq1-new.lsim" / "seq1-new.svg", regardless
+// of the internal drawing name.  Falls back to state.drawingName if no file
+// has been loaded or saved yet.
+function fileNameStem(){
+  if(state.lastName){
+    const dot=state.lastName.lastIndexOf('.');
+    return dot>0?state.lastName.slice(0,dot):state.lastName;
+  }
+  return state.drawingName;
+}
+
 // --- .lsim export ---
 function generateLsimDCmd(d){
   switch(d.type){
@@ -1526,7 +1540,7 @@ async function exportLsim(){
   try{
     const{text,warnings}=generateLsim();
     for(const w of warnings)logMsg(LogLevel.WARN,w);
-    const defaultName=state.drawingName+'.lsim';
+    const defaultName=fileNameStem()+'.lsim';
     const opts={
       suggestedName:defaultName,
       types:[{description:'lsim files',accept:{'text/plain':['.lsim']}}],
@@ -1602,7 +1616,7 @@ async function exportSvg(){
   try{
     const text=generateSvg();
     const opts={
-      suggestedName:state.drawingName+'.svg',
+      suggestedName:fileNameStem()+'.svg',
       types:[{description:'SVG files',accept:{'image/svg+xml':['.svg']}}],
     };
     if(state.lastHandle)opts.startIn=state.lastHandle;
