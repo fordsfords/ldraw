@@ -52,6 +52,4 @@ There is no automated test suite. `TESTS.md` is a manual randomized checklist (p
 - `netsource`/`netsink` are pseudo-devices implementing named nets (invisible wires); they do not exist in `lsim`.
 - Singleton devices (`gnd`, `vcc`, `clk`) may appear once per drawing.
 
-## Legacy workflow files
-
-`get.sh`, `x.put.sh` and `roll.sh.x` were for moving the repo to/from claude.ai web sessions as base64 tarballs (`get.sh` fetched changes into a `claude-main` branch). They are obsolete now that Claude Code edits the repo directly. Gitignored scratch: `x`, `x.*`, `*.x`, `prev/`.
+Gitignored scratch: `x`, `x.*`, `*.x`, `prev/`.
