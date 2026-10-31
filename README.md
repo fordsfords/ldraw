@@ -3,11 +3,12 @@
 A GUI tool for drawing logic circuit schematics. Companion to the
 [lsim](https://github.com/fordsfords/lsim) hardware simulator.
 
-WARNING: This was [vibe coded](https://en.wikipedia.org/wiki/Vibe_coding)
-by me and Claude.ai, using the web interface, not Claude code.
-I am not familiar enough with HTML-based javascript to properly review the code,
-so it is here as-written and self-reviewed by Claude.
-Fortunatley, it executes in a browser sandbox,
+NOTE: This was [vibe coded](https://en.wikipedia.org/wiki/Vibe_coding).
+It was originally written with Claude.ai's web interface and is now
+maintained with Claude Code. I am not familiar enough with HTML-based
+javascript to properly review the code, so it is here as-written and
+self-reviewed by Claude.
+Fortunately, it executes in a browser sandbox,
 so even if it is buggy, it shouldn't be able to damage anything.
 
 <!-- mdtoc-start -->
@@ -18,14 +19,13 @@ so even if it is buggy, it shouldn't be able to damage anything.
 &nbsp;&nbsp;&nbsp;&nbsp;&bull; [Files](#files)  
 &nbsp;&nbsp;&nbsp;&nbsp;&bull; [Log messages](#log-messages)  
 &nbsp;&nbsp;&nbsp;&nbsp;&bull; [Status](#status)  
-&nbsp;&nbsp;&nbsp;&nbsp;&bull; [Internals](#internals)  
 &nbsp;&nbsp;&nbsp;&nbsp;&bull; [License](#license)  
 <!-- TOC created by '../mdtoc/mdtoc.pl README.md' (see https://github.com/fordsfords/mdtoc) -->
 <!-- mdtoc-end -->
 
 ## Quick Start
 
-Grab a copy of "lsim.html". Store it on your local file system (no server needed). Point Chrome browser at it.
+Grab a copy of "ldraw.html". Store it on your local file system (no server needed). Point Chrome browser at it.
 
 Right-click on empty canvas to access drawing commands: add devices, load/save
 files, pan to coordinates, undo.
@@ -102,14 +102,9 @@ and then include a "Yo" at the end to attract your attention.
 
 ## Status
 
-Phases 1–6b are complete (device placement, editing, wiring with waypoints
-and branch points, named net behaviour, `.lsim` export). Phase 6c (`.svg`
-export) is not yet implemented. See [internals.md](internals.md) for
-development details and future work.
-
-## Internals
-
-See [internals](internals.md).
+Device placement, editing, wiring with waypoints and branch points,
+named nets, and `.lsim` export are working. `.svg` export is not yet
+implemented.
 
 ## License
 
